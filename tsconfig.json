@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  // 테스트(*.test.ts)도 일부러 포함한다 — tsc 가 테스트 코드까지 타입 검사해 주고, 컴파일된
+  // dist/**/*.test.js 를 node --test 로 돌린다(npm test).
+  // ⚠️ .ts 를 node 로 직접 실행하는 방법은 쓸 수 없다: 이 프로젝트는 상대 경로 import 를 `.js` 확장자로
+  // 쓰는데(컴파일 결과 기준), Node 가 .ts 를 직접 실행하면 `./rpsRules.js` 를 문자 그대로 찾아 실패한다.
+  "include": ["src/**/*.ts"]
+}

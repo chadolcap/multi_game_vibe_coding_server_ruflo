@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.env
+
+# 로컬 Redis 데이터/로그
+redis/data/
