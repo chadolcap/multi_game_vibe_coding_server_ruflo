@@ -14,6 +14,7 @@ import { WebSocket } from "ws";
 // @colyseus/core Protocol.d.ts 기준
 export const PROTOCOL_ERROR = 1; // onAuth 거부 시 서버가 보낸다(525 AUTH_FAILED)
 export const PROTOCOL_JOIN_ROOM = 10; // 입장 성공 응답
+export const PROTOCOL_LEAVE_ROOM = 12; // 클라이언트의 **명시적 나가기** (아래 Leave 참고)
 export const PROTOCOL_ROOM_DATA = 13; // 애플리케이션 메시지
 
 // Colyseus 의 ROOM_DATA 프레임 = [13, 메시지 타입(msgpack fixstr), 본문(msgpack)]
@@ -106,6 +107,12 @@ export function ConnectWithSeat({ host, port, reservation, extra_headers = {}, t
                     // 서버가 보내는 ROOM_DATA 를 {type, payload} 로 받아 보는 콜백을 등록한다.
                     OnMessage: (callback) => listeners.push(callback),
                     Send: (type_name, body) => socket.send(EncodeRoomData(type_name, body)),
+                    // **명시적 나가기**(동의 종료). 소켓을 그냥 닫는 Close() 와 서버 쪽 처리가 다르다:
+                    //   Leave() → 서버가 CloseCode.CONSENTED 로 보고 **onDrop 을 건너뛰고 onLeave** 를 부른다
+                    //             (@colyseus/core Room.mjs: LEAVE_ROOM → _forciblyCloseClient(CONSENTED))
+                    //             → 재접속 창이 열리지 않는다 = "나가서 안 돌아오는" 경우
+                    //   Close() → 동의 없는 종료 → onDrop → 재접속 유예
+                    Leave: () => socket.send(Uint8Array.from([PROTOCOL_LEAVE_ROOM])),
                     Close: () => {
                         try {
                             socket.close();

@@ -21,6 +21,18 @@ export const OTHELLO_TURN_TIMEOUT_SEC = 10;
 // 다시 TURN_START 으로 넘거 간다").
 export const OTHELLO_SELECT_RESULT_DELAY_SEC = 2;
 
+// **자동 모드** 턴의 제한 시간 (사용자 결정 2026-10-13: "기존 A턴의 턴 제한 시간은 2초로 한다").
+// 자동 모드 = 연결이 끊긴 채 봇 투입 시간이 지났거나, 게임 중 아예 나가 버려 재입장하지 않는 유저.
+// 사람 차례는 OTHELLO_TURN_TIMEOUT_SEC(10초)를 그대로 쓰지만, 오델로는 한 게임에서 한 사람이 30수
+// 가까이 두기 때문에 자동 모드에도 10초를 적용하면 남은 유저가 최대 5분을 멍하니 기다리게 된다.
+// RPS 는 한 게임이 최대 3판이라 봇도 그냥 10초 타임아웃을 재사용했지만, 오델로는 턴 수가 많아 같은
+// 방식을 쓸 수 없다.
+// ⚠️ 이 값은 사람 턴과 **똑같이** TURN_REMAIN_TIME 카운트다운으로 흘러간다(사용자 결정 2026-10-13) —
+//    2초면 count:1 → count:0 이 가고 count:0 에서 서버가 놓는다. 2026-10-12 에는 1초였고 카운트다운을
+//    아예 보내지 않았는데, 그러면 클라이언트 타이머가 TURN_START 때의 10 에서 갱신되지 않고 멈춰
+//    보이는 문제가 있었다.
+export const OTHELLO_AUTO_TURN_TIMEOUT_SEC = 2;
+
 // GAME_RESULT 후 재게임/나가기 선택 제한 시간. 시트("10초 내에 재시작,/로비나가기 선택").
 export const OTHELLO_REMATCH_CHOICE_TIMEOUT_SEC = 10;
 

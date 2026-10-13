@@ -36,6 +36,7 @@ import type {
     OthelloGameResultPayload,
     OthelloGameStatusPayload,
     OthelloPlayRecord,
+    OthelloPoint,
     OthelloRemainTimePayload,
     OthelloReplayPayload,
     OthelloSelectGamePayload,
@@ -92,6 +93,12 @@ export class OthelloGameRoom extends Room {
     private readonly bot_sessions = new Set<string>();
     private readonly reconnection_by_session = new Map<string, Deferred<Client>>();
 
+    // 게임 중 **최종 퇴장**해서 재입장하지 않는 세션 (사용자 요청 2026-10-12).
+    // 좌석(players/color_by_session)은 그대로 남겨 두고 이 유저의 턴을 서버가 자동으로 둔다 —
+    // 남은 유저가 게임을 끝까지 마칠 수 있게 하고, 결과는 나간 유저의 승패에도 반영한다.
+    // 게임이 끝나면 FlushAbandonedPlayers() 가 좌석을 치우고 OUT_USER 를 보낸다.
+    private readonly abandoned_sessions = new Set<string>();
+
     // --- 오델로 전용 상태 ---
 
     private board: OthelloBoard = othelloRules.CreateInitialBoard();
@@ -103,6 +110,12 @@ export class OthelloGameRoom extends Room {
     // 지금 둘 차례인 세션. 턴 루프가 돌지 않을 때는 null.
     private turn_session: string | null = null;
     private turn_active = false;
+    // 지금 턴이 **자동 모드 턴**(서버가 대신 두는 턴)인지. SendTurnStart 가 턴을 시작할 때 한 번
+    // 확정하고 그 턴이 끝날 때까지 바꾸지 않는다 — 이 "턴 시작 시점에 고정"이 사용자 요구 두 개를
+    // 동시에 만족시킨다(2026-10-13):
+    //   · 자기 턴에 나갔으면 그 턴은 원래대로 10초가 끝까지 흐른다 (턴 중간의 퇴장은 영향 없음)
+    //   · 자동 모드 턴 중에 재접속해도 그 턴은 서버가 두고, 본인은 놓지 못한다 (HandleSelectGame 가드)
+    private turn_auto = false;
     // 이번 게임의 수순 — DB 로그(othello_game_log.plays)에 쓴다. StartGame 마다 비운다.
     private readonly plays: OthelloPlayRecord[] = [];
 
@@ -200,19 +213,38 @@ export class OthelloGameRoom extends Room {
     public onLeave(client: Client, code?: number): void {
         log.LogDisconnect(this, client, code);
         const left_user = this.players.get(client.sessionId);
-        this.players.delete(client.sessionId);
+
+        // 게임이 진행 중인데 최종 퇴장했다 = 이 유저는 재입장하지 않는다는 뜻이다.
+        // ⚠️ 클라이언트가 **명시적으로 나가기**를 하면 onDrop 을 거치지 않고 곧장 여기로 온다
+        //    (@colyseus/core Room.mjs: code 가 CONSENTED 면 onDrop 을 건너뛴다). 재접속 유예 중
+        //    재접속이 실패한 경우도 여기로 온다.
+        // 그 경우 좌석을 비우지 않고 **자동 모드**로 이 유저의 턴을 계속 둔다(사용자 요청 2026-10-12):
+        //   · players/color_by_session 을 유지해야 AdvanceTurn 의 "2명" 가드와 턴 루프가 계속 돈다
+        //     (예전에는 여기서 좌석을 비워서 게임이 영구히 멈추고 GAME_RESULT/DB 기록도 없었다)
+        //   · bot_sessions 에 넣어 DB 의 win_is_bot/lose_is_bot 에 "봇이 마무리했다"고 남긴다
+        //   · OUT_USER 는 **지금 보내지 않는다** — 게임이 끝난 뒤에 보낸다(FlushAbandonedPlayers).
+        //     지금 보내면 클라이언트가 게임을 접어 버려서 자동 모드로 끝까지 두는 의미가 없어진다.
+        const abandoned_mid_game = left_user !== undefined && this.IsGameInProgress();
+
+        if (abandoned_mid_game) {
+            this.abandoned_sessions.add(client.sessionId);
+            this.bot_sessions.add(client.sessionId);
+        } else {
+            this.players.delete(client.sessionId);
+            this.color_by_session.delete(client.sessionId);
+            // 게임이 진행 중이 아니면(좌석 채우기/ENTER_ROOM·READY 대기/게임 종료 후) 더 돌릴 턴이
+            // 없으므로 진행 중인 타이머를 멈춘다.
+            this.turn_active = false;
+            this.turn_auto = false;
+            this.ClearTurnTimers();
+            this.bot_sessions.delete(client.sessionId);
+        }
+
         this.entered_by_session.delete(client.sessionId);
         this.ready_by_session.delete(client.sessionId);
-        this.color_by_session.delete(client.sessionId);
-        // 클라이언트가 명시적으로 나가기를 요청하면 onDrop 을 거치지 않고 곧장 여기로 온다 —
-        // 그 경우를 위해 진행 중인 타이머를 멈춘다.
-        this.turn_active = false;
-        this.remain_time_interval?.clear();
-        this.remain_time_interval = null;
         this.replay_by_session.delete(client.sessionId);
         this.bot_timeout_by_session.get(client.sessionId)?.clear();
         this.bot_timeout_by_session.delete(client.sessionId);
-        this.bot_sessions.delete(client.sessionId);
         this.reconnection_by_session.delete(client.sessionId);
 
         if (left_user) {
@@ -239,12 +271,18 @@ export class OthelloGameRoom extends Room {
             this.waiting_session = null;
         }
 
-        // 남은 상대에게 알린다 (this.clients 에서는 이미 제거된 상태)
-        if (left_user) {
+        // 남은 상대에게 알린다 (this.clients 에서는 이미 제거된 상태).
+        // 자동 모드로 이어 두는 경우는 여기서 보내지 않는다 — 게임이 끝난 뒤 FlushAbandonedPlayers() 가 보낸다.
+        if (left_user && !abandoned_mid_game) {
             const payload: OutUserPayload = { userid: left_user.userid };
             for (const remaining_client of this.clients) {
                 messages.SendMessage(this, remaining_client, types.MessageType.OUT_USER, payload);
             }
+        }
+
+        if (abandoned_mid_game) {
+            this.OnPlayerAbandonedMidGame(client.sessionId);
+            return;
         }
 
         // 재게임 응답 대기 중에 상대가 나갔고 남은 유저가 이미 응답했다면 타임아웃을 기다리지 않고 마무리
@@ -262,9 +300,13 @@ export class OthelloGameRoom extends Room {
         console.log(`[OthelloGameRoom] 제거됨 roomId=${this.roomId}`);
     }
 
-    // ADMIN_CHANNEL_USER 용 — 지금 이 방에 있는 유저의 userid + roomId
+    // ADMIN_CHANNEL_USER 용 — 지금 이 방에 있는 유저의 userid + roomId.
+    // 자동 모드로 대신 두고 있는(이미 나간) 유저는 접속자가 아니므로 제외한다 — 좌석은 게임이 끝날
+    // 때까지 남아 있지만 관리자 화면이 보는 건 "지금 붙어 있는 유저"다.
     public GetChannelUserEntries(): AdminChannelUserEntry[] {
-        return [...this.players.values()].map((user) => ({ userid: user.userid, room: this.roomId }));
+        return [...this.players.entries()]
+            .filter(([sessionId]) => !this.abandoned_sessions.has(sessionId))
+            .map(([, user]) => ({ userid: user.userid, room: this.roomId }));
     }
 
     // 무중단 재시작 드레인용 — 지금 실제로 게임이 진행 중인지
@@ -351,7 +393,12 @@ export class OthelloGameRoom extends Room {
         // 서버가 랜덤으로 놓아 버린다.
         // ⚠️ SELECT_GAME 결과 후 다음 TURN_START 까지의 2초 공백에는 활성 턴이 없어 채울 수 없다 —
         //    그 경우 두 필드를 생략한다(클라이언트는 곧 오는 TURN_START 로 따라잡는다).
-        const turn_user = this.turn_active && this.turn_session !== null ? this.players.get(this.turn_session) : undefined;
+        // ⚠️ **자기 자동 턴 중에 재접속한 경우도 생략한다**(2026-10-13) — 그 턴은 서버가 두고 본인은
+        //    놓을 수 없으므로(HandleSelectGame 가드) turn/can 을 주면 "내 차례"로 오해해 놓으려 하고
+        //    서버는 조용히 무시하게 된다. 생략하면 곧 오는 다음 TURN_START 로 자연스럽게 따라잡는다.
+        //    상대(나간 유저)의 자동 턴은 그대로 보낸다 — 남은 유저는 "지금 상대 차례"를 알아야 한다.
+        const my_auto_turn = this.turn_auto && this.turn_session === client.sessionId;
+        const turn_user = this.turn_active && !my_auto_turn && this.turn_session !== null ? this.players.get(this.turn_session) : undefined;
         const turn_color = this.turn_session !== null ? this.color_by_session.get(this.turn_session) : undefined;
 
         const payload: OthelloGameStatusPayload = {
@@ -426,7 +473,7 @@ export class OthelloGameRoom extends Room {
             }
 
             if (remaining === 0) {
-                this.ClearRemainTimeInterval();
+                this.ClearTurnTimers();
                 this.ResolveDollSelect();
             } else {
                 remaining--;
@@ -449,7 +496,7 @@ export class OthelloGameRoom extends Room {
             this.color_by_session.set(opponent_session, othelloRules.GetOpponentColor(message.color));
         }
 
-        this.ClearRemainTimeInterval();
+        this.ClearTurnTimers();
         this.ResolveDollSelect();
     }
 
@@ -498,6 +545,54 @@ export class OthelloGameRoom extends Room {
         return undefined;
     }
 
+    // 자동 모드(서버가 대신 두는) 세션인지.
+    //   · reconnection_by_session: **지금 연결이 끊겨 있는**(재접속 유예 중인) 세션 — 2026-10-13 추가.
+    //   · bot_sessions: 연결이 끊긴 뒤 RECONNECT_WAIT_SEC(5초)가 지나 봇이 투입된 세션.
+    //     재접속하면 onReconnect 가 지우므로 그 뒤의 턴은 다시 사람 차례로 돌아간다.
+    //   · abandoned_sessions: 게임 중 최종 퇴장해 재입장하지 않는 세션 (onLeave 에서 추가).
+    // ⚠️ **첫 번째 조건이 빠져 있던 것이 실제 버그였다** (사용자 신고 2026-10-13: "A가 나가서 재입장을
+    //    하지 않았고, 다음 다시 A턴이 왔지만 턴 남은 시간이 10 부터 시작"). 끊김(drop)은 봇이 **끊긴 지
+    //    5초 뒤**에야 bot_sessions 에 들어가는데, 오델로는 A 착수 → 2초 → B 착수 → 2초 → A 턴이라 A 의
+    //    다음 턴이 거의 항상 그 5초 안에 시작된다. 턴 성격은 시작 시점에 고정되므로(turn_auto) 그 턴은
+    //    통째로 10초가 됐다 — 실제 로그로 재현 확인(TURN_START(A) → 봇 투입 → count 9…0).
+    //    그래서 "끊겨 있는 동안 시작되는 턴"은 봇 투입 전이라도 자동 턴(2초)으로 본다. 재접속하면
+    //    onReconnect 가 reconnection_by_session 에서 지우므로 **다음 턴부터** 다시 사람 턴이 된다
+    //    (사용자 규칙 "재입장한 그 턴은 못 놓고 다음 턴부터 가능"과 같은 동작).
+    //    bot_sessions 의 5초 타이머는 이제 DB 의 win_is_bot/lose_is_bot 판정에만 쓰인다.
+    // onLeave 가 abandoned 를 bot_sessions 에도 넣으므로 셋이 겹치지만, 의미가 다르므로(끊김은 곧 돌아올
+    // 수 있고, 봇은 오래 끊긴 것이고, 퇴장은 돌아올 수 없다) 모두 명시해 둔다.
+    private IsAutoSession(session_id: string): boolean {
+        return (
+            this.reconnection_by_session.has(session_id) ||
+            this.bot_sessions.has(session_id) ||
+            this.abandoned_sessions.has(session_id)
+        );
+    }
+
+    // 게임 중 한 명이 최종 퇴장했을 때 — 자동 모드로 이어 갈 수 있는지 판단한다 (사용자 요청 2026-10-12).
+    private OnPlayerAbandonedMidGame(session_id: string): void {
+        console.log(`[OthelloGameRoom] 게임 중 퇴장 → 자동 모드 roomId=${this.roomId} sessionId=${session_id}`);
+
+        // 둘 다 나가 버렸으면 결과를 볼 사람이 아무도 없다 — 끝까지 자동으로 두지 않고(방을 최대
+        // 10분 점유하고 무중단 재시작 드레인도 그만큼 늦어진다) 지금 돌 수로 종료한다.
+        // 승패·통계·게임 로그는 그대로 남는다 (사용자 결정 2026-10-12).
+        if (this.clients.length === 0 && this.reconnection_by_session.size === 0) {
+            console.log(`[OthelloGameRoom] 남은 유저 없음 → 현재 돌 수로 종료 roomId=${this.roomId}`);
+            this.ClearTurnTimers();
+            void this.FinishGame();
+            return;
+        }
+
+        // ⚠️ **나간 그 턴은 건드리지 않는다** (사용자 지시 2026-10-12 "본인의 턴에 나갔을 경우에는
+        //    그턴은 타임을 계속 체크 해 주고, 다음 턴 부터는 자동 플레이", 2026-10-13 재확인 "A가
+        //    자기턴에 나갔을 경우에는 카운트 중인 턴 제한 시간을 계속 경과 시킨다"). 진행 중인 10초
+        //    카운트다운(TURN_REMAIN_TIME)을 그대로 흘려보내고, count:0 에서 기존 타임아웃 경로가
+        //    자동으로 놓는다 — 그래야 나간 유저가 그 턴 안에 돌아올 여지가 남는다.
+        //    자동 모드(제한 시간 2초)로 바뀌는 건 **다음 턴**부터다: SendTurnStart 가 턴을 시작할 때
+        //    IsAutoSession() 으로 판단해 turn_auto 에 고정하므로, 이미 시작된 턴에는 영향이 없다.
+        //    (처음엔 여기서 남은 시간을 1초로 당겼는데, 사용자 지시로 되돌렸다)
+    }
+
     // next_color 차례로 넘어간다. 여기서 **패스와 종료를 함께 판정**한다:
     //   - next_color 가 둘 곳이 있으면 그 차례로 TURN_START
     //   - 없고 상대는 있으면 패스 → 상대 차례로 TURN_START (별도 PASS 메시지는 보내지 않는다.
@@ -505,7 +600,9 @@ export class OthelloGameRoom extends Room {
     //   - 둘 다 없으면 게임 종료
     private AdvanceTurn(next_color: OthelloColor): void {
         if (this.game_over) return;
-        if (this.players.size < constants.PLAYERS_PER_ROOM) return; // 상대가 완전히 나갔으면 진행하지 않는다
+        // 좌석이 비었으면 진행하지 않는다. 게임 중 퇴장은 좌석을 비우지 않고 자동 모드로 이어 가므로
+        // (onLeave 참고) 여기 걸리는 건 게임 시작 전/종료 후뿐이다.
+        if (this.players.size < constants.PLAYERS_PER_ROOM) return;
 
         const next_moves = othelloRules.GetLegalMoves(this.board, next_color);
         if (next_moves.length > 0) {
@@ -526,20 +623,30 @@ export class OthelloGameRoom extends Room {
     }
 
     // TURN_START (S→C) + 1초마다 TURN_REMAIN_TIME. 제한 시간이 끝나면 합법수 중 하나를 랜덤으로 놓는다.
-    private SendTurnStart(color: OthelloColor, legal_moves: { x: number; y: number }[]): void {
+    // 자동 모드 세션의 차례면 **같은 카운트다운을 짧은 제한 시간(2초)으로** 돌린다 — 사람 턴과 코드
+    // 경로가 같아서 클라이언트도 구분 없이 같은 타이머 UI 를 쓸 수 있다(사용자 결정 2026-10-13).
+    private SendTurnStart(color: OthelloColor, legal_moves: OthelloPoint[]): void {
         const turn_session = this.GetSessionByColor(color);
         const turn_user = turn_session !== undefined ? this.players.get(turn_session) : undefined;
         if (!turn_session || !turn_user) return; // 그 색의 유저가 없다 — 진행 불가
 
         this.turn_session = turn_session;
         this.turn_active = true;
+        // ⚠️ 이 턴이 자동 턴인지는 **여기서 한 번만** 판단한다 (turn_auto 필드 주석 참고).
+        this.turn_auto = this.IsAutoSession(turn_session);
 
+        // TURN_START 는 자동 모드에서도 그대로 보낸다 — 남은 유저가 "지금 상대(자동) 차례"임을
+        // 알고 화면을 맞출 수 있어야 한다.
         const payload: OthelloTurnStartPayload = { turn: turn_user.userid, can: legal_moves };
         for (const client of this.clients) {
             messages.SendMessage(this, client, types.MessageType.TURN_START, payload);
         }
 
-        let remaining = othelloConstants.OTHELLO_TURN_TIMEOUT_SEC - 1;
+        const timeout_sec = this.turn_auto
+            ? othelloConstants.OTHELLO_AUTO_TURN_TIMEOUT_SEC
+            : othelloConstants.OTHELLO_TURN_TIMEOUT_SEC;
+
+        let remaining = timeout_sec - 1;
         this.remain_time_interval = this.clock.setInterval(() => {
             const remain_payload: OthelloRemainTimePayload = { count: remaining };
             for (const client of this.clients) {
@@ -547,21 +654,31 @@ export class OthelloGameRoom extends Room {
             }
 
             if (remaining === 0) {
-                this.ClearRemainTimeInterval();
+                this.ClearTurnTimers();
                 // 시트: "10초 동안 선택을 안 한 경우 랜덤으로 배치를 해 준다"
-                // 연결이 끊겨 봇이 대신하는 경우도 이 경로를 그대로 쓴다 — 봇 전용 코드는 따로 없다.
-                const random_move = legal_moves[Math.floor(Math.random() * legal_moves.length)];
-                this.PlaceStone(turn_session, random_move.x, random_move.y);
+                // 자동 모드 턴이면 같은 경로로 2초 뒤에 여기 온다.
+                this.PlaceRandomStone(turn_session, legal_moves);
             } else {
                 remaining--;
             }
         }, 1000);
     }
 
+    private PlaceRandomStone(session_id: string, legal_moves: OthelloPoint[]): void {
+        const random_move = legal_moves[Math.floor(Math.random() * legal_moves.length)];
+        this.PlaceStone(session_id, random_move.x, random_move.y);
+    }
+
     // SELECT_GAME (C→S) — 돌을 놓을 자리
     private HandleSelectGame(client: Client, message: OthelloSelectGamePayload): void {
         if (!this.turn_active || this.game_over) return;
         if (client.sessionId !== this.turn_session) return; // 자기 차례가 아니다 — 무시
+        // ⚠️ 자동 턴으로 **시작된** 턴은 그 턴이 끝날 때까지 서버가 둔다 — 중간에 재접속해도 본인은
+        //    놓지 못하고 다음 턴부터 놓을 수 있다 (사용자 지시 2026-10-13: "A가 나간 후에 몇 십초가
+        //    지나 본인 턴에 다시 재입장을 하는 경우에는 그 턴은 본인이 놓을 자리를 선택하지 못하고,
+        //    다음 턴부터 가능"). onReconnect 가 bot_sessions 를 지워도 이 플래그는 턴 시작 시점
+        //    값이라 영향이 없고, 다음 SendTurnStart 에서 다시 판단되어 사람 턴으로 돌아간다.
+        if (this.turn_auto) return;
 
         const x = message?.select?.x;
         const y = message?.select?.y;
@@ -571,7 +688,7 @@ export class OthelloGameRoom extends Room {
         if (color === undefined) return;
         if (!othelloRules.IsLegalMove(this.board, x, y, color)) return; // 못 놓는 자리 — 무시
 
-        this.ClearRemainTimeInterval();
+        this.ClearTurnTimers();
         this.PlaceStone(client.sessionId, x, y);
     }
 
@@ -588,6 +705,7 @@ export class OthelloGameRoom extends Room {
 
         this.turn_active = false;
         this.turn_session = null;
+        this.turn_auto = false;
         this.plays.push({ userid: user.userid, x, y });
 
         const payload: OthelloSelectGameResultPayload = {
@@ -604,7 +722,10 @@ export class OthelloGameRoom extends Room {
         }, othelloConstants.OTHELLO_SELECT_RESULT_DELAY_SEC * 1000);
     }
 
-    private ClearRemainTimeInterval(): void {
+    // 돌 선택 / 턴 카운트다운 인터벌을 멈춘다. 둘은 같은 필드를 쓰고 동시에 돌지 않는다.
+    // (2026-10-12 에는 자동 모드 전용 타이머가 따로 있어서 함께 멈췄는데, 2026-10-13 자동 턴도
+    //  같은 카운트다운을 쓰게 되어 지울 대상이 하나로 줄었다 — 이름은 호출부를 위해 그대로 둔다)
+    private ClearTurnTimers(): void {
         this.remain_time_interval?.clear();
         this.remain_time_interval = null;
     }
@@ -612,11 +733,14 @@ export class OthelloGameRoom extends Room {
     // --- 게임 종료 ---
 
     // 양쪽 모두 놓을 곳이 없을 때 최종 결과를 보낸다. 돌이 많은 쪽이 승리, 같으면 무승부.
+    // 게임 중 나가서 자동 모드로 대신 둔 유저도 **그대로 참가자로 집계한다** — 결과는 그 유저의
+    // 승패/통계/랭킹에도 반영된다(사용자 요청 2026-10-12).
     private async FinishGame(): Promise<void> {
         this.game_over = true;
         this.turn_active = false;
         this.turn_session = null;
-        this.ClearRemainTimeInterval();
+        this.turn_auto = false;
+        this.ClearTurnTimers();
 
         const sessions = [...this.players.keys()];
 
@@ -657,8 +781,10 @@ export class OthelloGameRoom extends Room {
         const winner_user = winner_session !== undefined ? this.players.get(winner_session) : undefined;
         const loser_user = loser_session !== undefined ? this.players.get(loser_session) : undefined;
         if (!winner_user || !loser_user) {
-            // 한쪽이 이미 완전히 나간 상태 — 결과를 보낼 상대가 없다. 재게임 선택만 받고 끝낸다.
+            // 좌석 정보가 비어 결과를 만들 수 없다 — 게임 중 퇴장은 좌석을 비우지 않으므로
+            // (onLeave 참고) 정상 흐름에서는 여기 오지 않는다. 재게임 선택만 받고 끝낸다.
             console.error(`[OthelloGameRoom] 게임 종료 시 플레이어 정보 없음 roomId=${this.roomId}`);
+            this.FlushAbandonedPlayers();
             this.StartReplayWait();
             return;
         }
@@ -689,6 +815,11 @@ export class OthelloGameRoom extends Room {
             messages.SendMessage(this, client, types.MessageType.GAME_RESULT, payload);
         }
 
+        // 자동 모드로 마무리한 유저가 있으면 **이제** 남은 유저에게 그 사실을 알린다 (사용자 요청
+        // 2026-10-12: "게임이 종료 되면 남아 있는 유저에게 나간 사용자 정보로 전달을 한다").
+        // 순서가 중요하다 — GAME_RESULT 를 먼저 보내야 결과 payload 에 그 유저 정보가 담긴다.
+        this.FlushAbandonedPlayers();
+
         this.StartReplayWait();
 
         try {
@@ -717,6 +848,30 @@ export class OthelloGameRoom extends Room {
         } catch (error) {
             console.error(`[OthelloGameRoom] 게임 결과 저장 실패 roomId=${this.roomId}:`, error instanceof Error ? error.message : error);
         }
+    }
+
+    // 자동 모드로 대신 둔(게임 중 나가서 재입장하지 않은) 유저들을 좌석에서 치우고, 남은 유저에게
+    // OUT_USER 로 "이 유저가 나갔다"를 알린다.
+    // ⚠️ **GAME_RESULT 를 보낸 뒤에** 호출해야 한다 — 먼저 치우면 결과 payload 에 담을 정보가 없다.
+    // ⚠️ bot_sessions 도 여기서 비우므로, DB 에 넘길 win_is_bot/lose_is_bot 은 이 호출 전에 읽어야 한다.
+    // 치워야 하는 이유: 좌석이 남아 있으면 재게임 응답을 영원히 기다리는 유저가 생기고
+    // (ResolveReplay 의 all_responded), 혼자 남은 유저가 "기다리는 방"으로도 못 넘어간다.
+    private FlushAbandonedPlayers(): void {
+        if (this.abandoned_sessions.size === 0) return;
+
+        for (const sessionId of this.abandoned_sessions) {
+            const user = this.players.get(sessionId);
+            this.players.delete(sessionId);
+            this.color_by_session.delete(sessionId);
+            this.bot_sessions.delete(sessionId);
+            if (!user) continue;
+
+            const payload: OutUserPayload = { userid: user.userid };
+            for (const client of this.clients) {
+                messages.SendMessage(this, client, types.MessageType.OUT_USER, payload);
+            }
+        }
+        this.abandoned_sessions.clear();
     }
 
     // 재게임/나가기 선택을 기다린다 (DB 저장을 기다리지 않고 먼저 시작한다)
@@ -785,7 +940,11 @@ export class OthelloGameRoom extends Room {
         this.doll_select_done = false;
         this.turn_session = null;
         this.turn_active = false;
-        this.ClearRemainTimeInterval();
+        this.turn_auto = false;
+        this.ClearTurnTimers();
+        // 평소엔 FlushAbandonedPlayers() 가 게임 종료 때 이미 비웠다 — 새 게임이 이전 게임의
+        // 자동 모드 표시를 물려받지 않도록 하는 안전장치다.
+        this.abandoned_sessions.clear();
         this.game_over = false;
         this.replay_by_session.clear();
         this.replay_timeout?.clear();

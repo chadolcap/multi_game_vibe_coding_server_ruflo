@@ -1,0 +1,11 @@
+/* 마크다운 미리보기 전용 스타일 — 표 선을 기본값보다 조금 진하게 */
+/* settings.json 의 markdown.styles 로 연결된다 (이 프로젝트를 열 때만 적용) */
+
+table th,
+table td {
+	border: 1px solid rgba(128, 128, 128, 0.55) !important;
+}
+
+table th {
+	border-bottom: 2px solid rgba(128, 128, 128, 0.75) !important;
+}

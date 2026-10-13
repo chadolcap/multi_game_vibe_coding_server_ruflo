@@ -102,6 +102,12 @@ export class RpsGameRoom extends Room {
     // 곧바로 onLeave() 를 불러 최종 정리한다.
     private readonly reconnection_by_session = new Map<string, Deferred<Client>>();
 
+    // 게임 중 **최종 퇴장**해서 재입장하지 않는 세션 (사용자 요청 2026-10-13, 오델로와 같은 규칙).
+    // 좌석(players/win_count_by_session)을 그대로 남겨 두고 이 유저의 선택을 서버가 대신한다 —
+    // 남은 유저가 게임을 끝까지 마칠 수 있게 하고, 결과는 나간 유저의 승패/DB 에도 반영한다.
+    // 게임이 끝나면 FlushAbandonedPlayers() 가 좌석을 치우고 OUT_USER 를 보낸다.
+    private readonly abandoned_sessions = new Set<string>();
+
     public onCreate(): void {
         // 이름/roomId 로 직접 들어올 수 없게 잠근다 — 예약된 좌석으로만 입장 가능
         this.lock();
@@ -181,6 +187,12 @@ export class RpsGameRoom extends Room {
         // 처리는 onReconnect()/onLeave() 에서 한다 — 여기서 await 로 이어 처리하면 Colyseus 내부에 이미
         // 걸려 있는 다른 .then() 콜백(예: allowReconnection 자체의 후처리)과 실행 순서가 보장되지 않는다.
         this.reconnection_by_session.set(sessionId, this.allowReconnection(client, "manual"));
+
+        // 끊긴 유저는 지금부터 자동 모드다(IsAutoSession). 남은 유저가 이 판에서 이미 선택을 마쳤다면
+        // 제한 시간을 기다리지 않고 바로 판정한다 (사용자 요청 2026-10-13: "B사용자가 가위,바위,보를
+        // 선택하면 바로 A의 선택도 결정 / 상대방이 턴 제한 시간을 모두 기다리지 않도록").
+        // ⚠️ 예전에는 이 판정을 봇 투입(5초 뒤) 시점에 했다 — 그래서 끊김 경로는 최대 5초를 기다렸다.
+        this.TryResolveRoundIfOnlyAutoLeft();
     }
 
     // 재접속 성공. this.players 는 onDrop 이후에도 지우지 않았으므로(disconnected 상태에서도 좌석 유지)
@@ -203,23 +215,43 @@ export class RpsGameRoom extends Room {
     public onLeave(client: Client, code?: number): void {
         log.LogDisconnect(this, client, code);
         const left_user = this.players.get(client.sessionId);
-        this.players.delete(client.sessionId);
+
+        // 게임이 진행 중인데 최종 퇴장했다 = 이 유저는 재입장하지 않는다는 뜻이다.
+        // ⚠️ 클라이언트가 **명시적으로 나가기**(consented, `Protocol.LEAVE_ROOM`)를 하면 `onDrop` 을
+        //    거치지 않고 곧장 여기로 온다(@colyseus/core Room.mjs: code 가 CONSENTED 면 onDrop 을
+        //    건너뛴다). 재접속 유예 중 재접속이 실패한 경우도 여기로 온다.
+        // 그 경우 좌석을 비우지 않고 **자동 모드**로 이 유저의 선택을 계속 대신한다
+        // (사용자 요청 2026-10-13, 오델로와 같은 규칙 — CLAUDE.md "RPS/오델로 — 게임 중 퇴장" 참고):
+        //   · players/win_count_by_session 을 유지해야 SendOneStart/ResolveRound 의 "2명" 가드와 라운드
+        //     루프가 계속 돈다 (예전에는 여기서 좌석을 비워서 게임이 그대로 멈추고 GAME_RESULT 도,
+        //     DB 기록도 남지 않았다 — 나간 유저는 물론 **남아 있던 유저의 전적까지** 사라졌다)
+        //   · 진행 중인 판의 타이머도 **멈추지 않는다** — 남은 카운트다운이 끝나면 기존 자동 선택
+        //     경로(ResolveRound)가 이 유저의 값을 랜덤으로 채워 판정한다
+        //   · bot_sessions 에 넣어 DB 의 win_is_bot/lose_is_bot 에 "봇이 마무리했다"고 남긴다
+        //   · OUT_USER 는 **지금 보내지 않는다** — 게임이 끝난 뒤에 보낸다(FlushAbandonedPlayers)
+        const abandoned_mid_game = left_user !== undefined && this.IsGameInProgress();
+
+        if (abandoned_mid_game) {
+            this.abandoned_sessions.add(client.sessionId);
+            this.bot_sessions.add(client.sessionId);
+            // choice_by_session 은 지우지 않는다 — 나가기 전에 이미 낸 값이 있으면 그 값으로 판정한다.
+        } else {
+            this.players.delete(client.sessionId);
+            this.choice_by_session.delete(client.sessionId);
+            this.win_count_by_session.delete(client.sessionId);
+            // 게임이 진행 중이 아니면(좌석 채우기/ENTER_ROOM·READY 대기/게임 종료 후) 더 돌릴 판이
+            // 없으므로 진행 중인 타이머를 멈춘다.
+            this.round_active = false;
+            this.remain_time_interval?.clear();
+            this.remain_time_interval = null;
+            this.bot_sessions.delete(client.sessionId);
+        }
+
         this.entered_by_session.delete(client.sessionId);
         this.ready_by_session.delete(client.sessionId);
-        this.choice_by_session.delete(client.sessionId);
-        this.win_count_by_session.delete(client.sessionId);
-        // Phase 6 이후에도 onLeave 가 라운드 진행 중에 불릴 수 있는 경우가 남아 있다 — 클라이언트가
-        // 명시적으로 나가기(consented, 예: Protocol.LEAVE_ROOM)를 요청한 경우는 onDrop 을 거치지 않고
-        // 곧장 여기로 온다(재접속 대상이 아니므로). 그 경우를 위해 라운드 타이머를 멈춘다. 예기치 않은
-        // 연결 끊김(onDrop 경유)이 여기로 오는 시점은 이미 game_over=true 이후(재접속 실패로 최종 정리될
-        // 때)뿐이라 이 시점엔 애초에 멈출 타이머가 없다.
-        this.round_active = false;
-        this.remain_time_interval?.clear();
-        this.remain_time_interval = null;
         this.replay_by_session.delete(client.sessionId);
         this.bot_timeout_by_session.get(client.sessionId)?.clear();
         this.bot_timeout_by_session.delete(client.sessionId);
-        this.bot_sessions.delete(client.sessionId);
         this.reconnection_by_session.delete(client.sessionId);
         // 이 유저는 최종적으로 나갔다 — 로비가 더 이상 이 방으로 재접속을 안내하면 안 되므로 지운다.
         // (F5 로 로비에 다시 들어왔는데 이미 끝난/나간 방으로 안내되는 것을 막는다.)
@@ -251,11 +283,18 @@ export class RpsGameRoom extends Room {
         // Colyseus Room._onLeave 가 clients.delete() 후에 onLeave 를 호출한다)
         // 재접속이 걸려 있던 세션(onDrop 경유)이었다면 이 시점은 이미 재접속에 실패해 최종적으로
         // 나간 것이므로, 여느 퇴장과 똑같이 OUT_USER 를 보낸다.
-        if (left_user) {
+        // 단, 자동 모드로 게임을 이어 두는 경우는 여기서 보내지 않는다 — 게임이 끝난 뒤
+        // FlushAbandonedPlayers() 가 보낸다(지금 보내면 클라이언트가 게임을 접어 버린다).
+        if (left_user && !abandoned_mid_game) {
             const payload: OutUserPayload = { userid: left_user.userid };
             for (const remaining_client of this.clients) {
                 messages.SendMessage(this, remaining_client, types.MessageType.OUT_USER, payload);
             }
+        }
+
+        if (abandoned_mid_game) {
+            this.OnPlayerAbandonedMidGame(client.sessionId);
+            return;
         }
 
         // 재게임/나가기 응답을 기다리는 중(game_over && replay_timeout 이 아직 안 지워짐)에 상대가 나갔고
@@ -279,8 +318,81 @@ export class RpsGameRoom extends Room {
 
     // ADMIN_CHANNEL_USER 용 — 지금 이 방에 있는 유저의 userid + roomId. room 필드는 지금은 Colyseus
     // roomId 문자열을 그대로 쓴다 (ENTER_ROOM 의 room 필드와 같은 미확정 사항 — types.ts 참고)
+    // 자동 모드로 대신 두고 있는(이미 나간) 유저는 제외한다 — 좌석은 게임이 끝날 때까지 남아 있지만
+    // 관리자 화면이 보는 건 "지금 붙어 있는 유저"다.
     public GetChannelUserEntries(): AdminChannelUserEntry[] {
-        return [...this.players.values()].map((user) => ({ userid: user.userid, room: this.roomId }));
+        return [...this.players.entries()]
+            .filter(([sessionId]) => !this.abandoned_sessions.has(sessionId))
+            .map(([, user]) => ({ userid: user.userid, room: this.roomId }));
+    }
+
+    // 게임 중 한 명이 최종 퇴장했을 때 — 자동 모드로 이어 갈 수 있는지 판단한다 (사용자 요청 2026-10-13).
+    private OnPlayerAbandonedMidGame(session_id: string): void {
+        console.log(`[RpsGameRoom] 게임 중 퇴장 → 자동 모드 roomId=${this.roomId} sessionId=${session_id}`);
+
+        // 둘 다 나가 버렸는지 먼저 확인한다 (아래 즉시 판정은 "남은 사람이 있다"는 전제다).
+        // 결과를 볼 사람이 아무도 없는 경우다.
+        // ⚠️ 오델로처럼 "지금 점수로 즉시 종료"를 할 수 없다: `rps_game_log.vs`/`score` 는 2선승
+        //    (`"2:0"`/`"2:1"`) 기준이라 1:0 같은 중간 점수로 끝내면 거짓 기록이 된다(오델로는 중간
+        //    돌 수도 그 자체로 올바른 점수라 가능했다). 그래서 남은 판을 **연출 지연과 카운트다운
+        //    없이 즉시** 판정해서 정상적인 2선승 결과를 만든다 — 한 게임이 최대 3판이라 가능하다.
+        if (this.clients.length === 0 && this.reconnection_by_session.size === 0) {
+            this.ResolveRemainingRoundsNow();
+            return;
+        }
+
+        // 남은 유저가 이미 선택을 마쳤다면 제한 시간을 다 기다리지 않고 지금 판정한다 (사용자 요청
+        // 2026-10-13: "상대방이 턴 제한 시간을 모두 기다리지 않도록 하는 조취"). 아직 선택을 안 했다면
+        // 여기서는 아무것도 하지 않고, 그 유저가 선택하는 순간 HandleSelectGame 이 같은 판단을 한다.
+        // ⚠️ 자동 모드 전용 제한 시간(오델로의 2초 같은 것)은 RPS 에 두지 않았다 — 남은 유저의 선택과
+        //    동시에 판이 끝나므로 기다릴 시간 자체가 없다. 아무도 선택하지 않고 방치하는 경우에만
+        //    기존 RPS_CHOICE_TIMEOUT_SEC(10초) 타임아웃이 쓰인다.
+        this.TryResolveRoundIfOnlyAutoLeft();
+    }
+
+    // 둘 다 나간 뒤 남은 판을 즉시(연출 지연/카운트다운 없이) 판정해 게임을 끝낸다.
+    // ⚠️ **즉시 끝내야 하는 이유**: 클라이언트가 하나도 없는 방은 Colyseus 가 좌석 예약 시간이 지나면
+    //    자동으로 dispose 한다. 평소 속도(판마다 10초 + 결과 연출 5초)로 두면 게임이 끝나기 전에 방이
+    //    사라져 GAME_RESULT 도, DB 기록도 남지 않는다.
+    private ResolveRemainingRoundsNow(): void {
+        console.log(`[RpsGameRoom] 남은 유저 없음 → 남은 판 즉시 판정 roomId=${this.roomId}`);
+
+        // 무승부는 판 수에 들어가지 않아 반복될 수 있으므로 상한을 둔다(무승부 확률 1/3 — 20판까지
+        // 무승부만 나올 확률은 사실상 0이지만, 무한 루프를 구조적으로 막아 둔다).
+        for (let guard = 0; guard < 20 && !this.game_over; guard++) {
+            this.remain_time_interval?.clear();
+            this.remain_time_interval = null;
+            this.choice_by_session.clear();
+            this.round_active = true;
+            // 아무 선택도 없으니 ResolveRound 가 양쪽 모두 랜덤으로 채워 판정한다(= 봇끼리 플레이).
+            // 2선승에 도달하면 ResolveRound 가 FinishGame 을 부르고 game_over 가 되어 루프가 끝난다.
+            this.ResolveRound();
+        }
+    }
+
+    // 자동 모드로 대신 둔(게임 중 나가서 재입장하지 않은) 유저들을 좌석에서 치우고, 남은 유저에게
+    // OUT_USER 로 "이 유저가 나갔다"를 알린다.
+    // ⚠️ **GAME_RESULT 를 보낸 뒤에** 호출해야 한다 — 먼저 치우면 결과 payload 에 담을 정보가 없다.
+    // ⚠️ bot_sessions 도 여기서 비우므로, DB 에 넘길 win_is_bot/lose_is_bot 은 이 호출 전에 읽어야 한다.
+    // 치워야 하는 이유: 좌석이 남아 있으면 재게임 응답을 영원히 기다리는 유저가 생기고
+    // (ResolveReplay 의 all_responded), 혼자 남은 유저가 "기다리는 방"으로도 못 넘어간다.
+    private FlushAbandonedPlayers(): void {
+        if (this.abandoned_sessions.size === 0) return;
+
+        for (const sessionId of this.abandoned_sessions) {
+            const user = this.players.get(sessionId);
+            this.players.delete(sessionId);
+            this.win_count_by_session.delete(sessionId);
+            this.choice_by_session.delete(sessionId);
+            this.bot_sessions.delete(sessionId);
+            if (!user) continue;
+
+            const payload: OutUserPayload = { userid: user.userid };
+            for (const client of this.clients) {
+                messages.SendMessage(this, client, types.MessageType.OUT_USER, payload);
+            }
+        }
+        this.abandoned_sessions.clear();
     }
 
     // 무중단 재시작 드레인용(index.ts, roomRegistry.CountRoomsInProgress) — 지금 실제로 게임이
@@ -408,9 +520,10 @@ export class RpsGameRoom extends Room {
     // ONE_START (S→C) — 한 판을 시작한다. 이후 1초마다 ONE_REMAIN_TIME 으로 남은 초를 알리고,
     // count 가 0 이 되면(=RPS_CHOICE_TIMEOUT_SEC 안에 SELECT_GAME 이 안 오면) 자동 선택으로 판을 마무리한다
     private SendOneStart(): void {
-        // 상대가 완전히 나갔으면(OUT_USER 로 이미 알림) 판을 더 진행하지 않는다. 재접속 대기 중이거나
-        // 봇이 대신하는 중인 세션은 onDrop 이후에도 players 에서 지우지 않으므로 이 가드에 걸리지 않고
-        // 라운드가 그대로 진행된다(선택을 안 내면 아래 RPS_CHOICE_TIMEOUT_SEC 자동 선택으로 봇 역할을 한다).
+        // 좌석이 비었으면 판을 더 진행하지 않는다. 재접속 대기 중이거나 봇이 대신하는 중인 세션,
+        // 그리고 게임 중 최종 퇴장한 세션(abandoned_sessions, 2026-10-13)은 좌석을 그대로 두므로 이
+        // 가드에 걸리지 않고 라운드가 계속 진행된다 — 선택을 안 내면 아래 RPS_CHOICE_TIMEOUT_SEC
+        // 자동 선택이 봇 역할을 한다. 그래서 여기 걸리는 건 게임 시작 전이나 종료 후(좌석 정리 뒤)뿐이다.
         if (this.players.size < constants.PLAYERS_PER_ROOM || this.game_over) return;
 
         this.choice_by_session.clear();
@@ -449,7 +562,56 @@ export class RpsGameRoom extends Room {
         const all_selected = [...this.players.keys()].every((sessionId) => this.choice_by_session.has(sessionId));
         if (all_selected) {
             this.ResolveRound();
+            return;
         }
+
+        // 상대가 자동 모드(나가서 재입장하지 않음 또는 봇)라면 그쪽 선택은 영원히 오지 않는다 —
+        // 제한 시간을 다 기다리지 말고 지금 판정한다 (사용자 요청 2026-10-13).
+        this.TryResolveRoundIfOnlyAutoLeft();
+    }
+
+    // 자동 모드(서버가 대신 내는) 세션인지.
+    //   · bot_sessions: 연결이 끊긴 뒤 RECONNECT_WAIT_SEC(5초)가 지나 봇이 투입된 세션.
+    //     재접속하면 onReconnect 가 지우므로 그 뒤의 판은 다시 사람 차례로 돌아간다.
+    //   · abandoned_sessions: 게임 중 최종 퇴장해 재입장하지 않는 세션 (onLeave 에서 추가).
+    // onLeave 가 abandoned 를 bot_sessions 에도 넣으므로 지금은 전자만 봐도 되지만, 둘의 의미가
+    // 다르므로(봇은 돌아올 수 있고, 퇴장은 돌아올 수 없다) 양쪽을 명시해 둔다 (오델로와 같은 구조).
+    // ⚠️ 2026-10-13 **reconnection_by_session(지금 연결이 끊겨 있는 세션)** 조건을 추가했다 — 오델로와
+    //    같은 실제 버그(사용자 신고 "A가 나가서 재입장하지 않았는데 다음 턴이 10 부터")의 RPS 쪽이다.
+    //    끊김(drop)은 봇이 끊긴 지 5초 뒤에야 bot_sessions 에 들어가서, 그 5초 동안은 남은 유저가 선택해도
+    //    판이 끝나지 않고 기다렸다. 지금은 끊긴 **즉시** 자동 모드로 보아 남은 유저의 선택과 동시에 판이
+    //    끝난다. 재접속하면 onReconnect 가 지우므로 그 뒤 판부터 다시 본인이 고른다.
+    //    bot_sessions 의 5초 타이머는 이제 DB 의 win_is_bot/lose_is_bot 판정에만 쓰인다.
+    private IsAutoSession(session_id: string): boolean {
+        return (
+            this.reconnection_by_session.has(session_id) ||
+            this.bot_sessions.has(session_id) ||
+            this.abandoned_sessions.has(session_id)
+        );
+    }
+
+    // 자동 모드 세션이 섞여 있을 때, **사람 쪽 선택이 모두 모였으면** 제한 시간을 기다리지 않고 즉시
+    // 판정한다 (사용자 요청 2026-10-13: "B사용자가 가위,바위,보를 선택하면 바로 A의 선택도 결정을
+    // 한다 / 상대방이 턴 제한 시간을 모두 기다리지 않도록 하는 조취").
+    // 자동 모드 세션의 값은 ResolveRound 가 그 자리에서 랜덤으로 채운다 — 기존 "제한 시간 초과 시
+    // 자동 선택" 과 **같은 경로**라 판정/로그/DB 처리가 전부 그대로 재사용된다.
+    // ⚠️ 자동 모드 세션이 하나도 없으면 아무것도 하지 않는다 — 평소 규칙(둘 다 선택해야 판정)을
+    //    바꾸지 않기 위한 가드다. 호출부 세 곳(선택 수신 / 게임 중 퇴장 / 연결 끊김)에서 모두 쓴다.
+    private TryResolveRoundIfOnlyAutoLeft(): void {
+        if (!this.round_active || this.game_over) return;
+        if (this.players.size < constants.PLAYERS_PER_ROOM) return;
+
+        const sessions = [...this.players.keys()];
+        if (!sessions.some((sessionId) => this.IsAutoSession(sessionId))) return;
+        // 양쪽 다 자동 모드면(둘 다 끊김 등) 기다리는 사람이 없으므로 앞당길 이유가 없다 — 평소 제한 시간을
+        // 그대로 쓴다. 둘 다 "최종 퇴장"한 경우는 OnPlayerAbandonedMidGame 의 즉시 판정이 따로 처리한다.
+        // (이 가드가 없으면 둘 다 잠깐 끊겼다 돌아오는 사이에 그 판이 서버 랜덤으로 끝나 버린다)
+        if (sessions.every((sessionId) => this.IsAutoSession(sessionId))) return;
+
+        const all_human_selected = sessions.every(
+            (sessionId) => this.IsAutoSession(sessionId) || this.choice_by_session.has(sessionId)
+        );
+        if (all_human_selected) this.ResolveRound();
     }
 
     // 판을 마무리한다. RPS_CHOICE_TIMEOUT_SEC 안에 선택하지 못한 유저는 무작위로 자동 선택한다
@@ -459,7 +621,7 @@ export class RpsGameRoom extends Room {
         this.remain_time_interval?.clear();
         this.remain_time_interval = null;
 
-        if (this.players.size < constants.PLAYERS_PER_ROOM) return; // 상대가 완전히 나가서(재접속 실패까지 끝남) 판정할 수 없음
+        if (this.players.size < constants.PLAYERS_PER_ROOM) return; // 좌석이 비어 판정할 수 없음(게임 시작 전/종료 후)
 
         for (const sessionId of this.players.keys()) {
             if (!this.choice_by_session.has(sessionId)) {
@@ -543,6 +705,11 @@ export class RpsGameRoom extends Room {
         for (const client of this.clients) {
             messages.SendMessage(this, client, types.MessageType.GAME_RESULT, payload);
         }
+
+        // 자동 모드로 마무리한(게임 중 나가서 재입장하지 않은) 유저가 있으면 **이제** 남은 유저에게
+        // 그 사실을 알리고 좌석을 치운다 (사용자 요청 2026-10-13). 순서가 중요하다 — GAME_RESULT 를
+        // 먼저 보내야 결과 payload 에 그 유저 정보가 담기고, win_is_bot/lose_is_bot 도 위에서 이미 읽었다.
+        this.FlushAbandonedPlayers();
 
         // 재게임/나가기 선택을 기다린다. RPS_REMATCH_CHOICE_TIMEOUT_SEC 안에 응답 없는 쪽은 나가기로 처리한다.
         // (아래 DB 저장을 기다리지 않고 먼저 시작한다 — 결과 화면/재게임 응답까지 DB 왕복 시간만큼 늦어지면 안 된다)
@@ -635,6 +802,9 @@ export class RpsGameRoom extends Room {
     private ResetRoundState(): void {
         this.win_count_by_session.clear();
         this.choice_by_session.clear();
+        // 평소엔 FlushAbandonedPlayers() 가 게임 종료 때 이미 비웠다 — 새 게임이 이전 게임의
+        // 자동 모드 표시를 물려받지 않도록 하는 안전장치다.
+        this.abandoned_sessions.clear();
         this.round_active = false;
         this.remain_time_interval?.clear();
         this.remain_time_interval = null;
