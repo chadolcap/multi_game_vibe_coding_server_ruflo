@@ -53,5 +53,9 @@ module.exports = {
         Channel("othello_1", "othello", 1),
         Channel("othello_2", "othello", 2),
         Channel("othello_3", "othello", 3),
+        // 점핑 (2026-10-14 추가, 포트 6041~6043)
+        Channel("stepping_1", "stepping", 1),
+        Channel("stepping_2", "stepping", 2),
+        Channel("stepping_3", "stepping", 3),
     ],
 };

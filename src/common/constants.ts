@@ -11,6 +11,7 @@
 // 운영 전환/증설 시 여기 값을 되돌리고, .env 의 *_PORTS 도 포트를 추가할 것 (LOBBY_PORTS 는 바로 추가 가능).
 export const RPS_CHANNEL_COUNT = 1;
 export const OTHELLO_CHANNEL_COUNT = 1; // 실 서비스 목표 3 (.env OTHELLO_PORTS=6031,6032,6033), 로컬 테스트는 6031 만
+export const STEPPING_CHANNEL_COUNT = 1; // 2026-10-14 점핑 추가. 실 서비스 목표 3 (.env STEPPING_PORTS=6041,6042,6043), 로컬 테스트는 6041 만
 export const MAX_CLIENTS_PER_CHANNEL = 300;     // 로비/게임 채널별 최대 동시 접속
 export const MAX_ROOMS_PER_GAME_CHANNEL = 100;  // 게임 채널별 방 개수
 export const MAX_PLAYERS_PER_GAME_CHANNEL = 200; // 게임 채널별 게임 인원

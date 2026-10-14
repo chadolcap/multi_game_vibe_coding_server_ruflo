@@ -71,6 +71,10 @@ export class RpsGameRoom extends Room {
     // ONE_START 뒤 1초마다 ONE_REMAIN_TIME 을 보내는 타이머. count 가 0 이 되면 자동으로 ResolveRound() 를 부른다.
     private remain_time_interval: Delayed | null = null;
     private game_over = false;
+    // 마지막 판 ONE_RESULT 뒤 RPS_LAST_RESULT_DELAY_SEC 를 기다렸다가 FinishGame 을 부르는 타이머.
+    // 기다리는 동안은 game_over=false(아직 진행 중)로 둔다 — 그 사이 끊김/퇴장도 게임 중 규칙(자동 모드,
+    // GAME_RESULT 직후 OUT_USER)을 그대로 따르게 하기 위해서다.
+    private finish_timeout: Delayed | null = null;
     // 이번 게임(2선승제 한 판)이 시작된 시각과, 지금까지 낸 판 기록 — game_log 저장(Phase 5-3)에 쓴다.
     // StartGame() 마다(최초 시작이든 같은 상대와의 재게임이든) 새로 초기화한다.
     private game_started_at: Date | null = null;
@@ -356,6 +360,16 @@ export class RpsGameRoom extends Room {
     //    사라져 GAME_RESULT 도, DB 기록도 남지 않는다.
     private ResolveRemainingRoundsNow(): void {
         console.log(`[RpsGameRoom] 남은 유저 없음 → 남은 판 즉시 판정 roomId=${this.roomId}`);
+
+        // 승부는 이미 났고 마지막 판 연출 대기(finish_timeout) 중에 둘 다 나간 경우 — 판을 더 돌리면 안 된다.
+        // 볼 사람이 없으니 기다리지 않고 바로 종료한다.
+        if (this.finish_timeout) {
+            this.finish_timeout.clear();
+            this.finish_timeout = null;
+            const [session_a, session_b] = [...this.players.keys()];
+            this.FinishGame(session_a, session_b);
+            return;
+        }
 
         // 무승부는 판 수에 들어가지 않아 반복될 수 있으므로 상한을 둔다(무승부 확률 1/3 — 20판까지
         // 무승부만 나올 확률은 사실상 0이지만, 무한 루프를 구조적으로 막아 둔다).
@@ -658,7 +672,16 @@ export class RpsGameRoom extends Room {
         this.win_count_by_session.set(winner_session, win_count);
 
         if (win_count >= rpsConstants.RPS_WIN_COUNT_TO_FINISH) {
-            this.FinishGame(session_a, session_b);
+            // 마지막 판 결과 연출을 보여줄 시간을 준 뒤 GAME_RESULT 를 보낸다 (사용자 요청 2026-10-14).
+            // 결과를 볼 클라이언트가 하나도 없으면(둘 다 나감 → ResolveRemainingRoundsNow) 기다리지 않는다.
+            if (this.clients.length === 0) {
+                this.FinishGame(session_a, session_b);
+                return;
+            }
+            this.finish_timeout = this.clock.setTimeout(() => {
+                this.finish_timeout = null;
+                this.FinishGame(session_a, session_b);
+            }, rpsConstants.RPS_LAST_RESULT_DELAY_SEC * 1000);
         } else {
             this.clock.setTimeout(() => this.SendOneStart(), rpsConstants.RPS_ONE_RESULT_DELAY_SEC * 1000);
         }

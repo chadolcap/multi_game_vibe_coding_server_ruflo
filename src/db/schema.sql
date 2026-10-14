@@ -121,3 +121,43 @@ CREATE TABLE IF NOT EXISTS othello_rank_weekly (
     PRIMARY KEY (date_start, userid),
     KEY idx_othello_rank_weekly_score (date_start, score)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 점핑(stepping) 통계 테이블 (2026-10-14 추가) ──
+-- othello_* 와 컬럼 구조가 완전히 같다(이름 규칙 `{게임}_user_play_info` / `{게임}_rank_daily` /
+-- `{게임}_rank_weekly` 를 지켜야 queries/ranking.ts 와 rankingZSet.ts 가 그대로 동작한다).
+-- ⚠️ 제약 이름은 DB 전역 유니크라 fk_stepping_play_userid / idx_stepping_rank_* 로 바꿨다.
+
+-- 점핑 유저의 게임 play 정보. total_score/today_score 는 랭킹 점수(stepping_game_log.score,
+-- 승리 시 20점 고정)를 누적한 값이다 — 승패 판정용 게임 점수(라이프×10 + 칸×5)가 아니다.
+CREATE TABLE IF NOT EXISTS stepping_user_play_info (
+    userid             VARCHAR(255)     NOT NULL,
+    total_game_count   INT UNSIGNED     NOT NULL DEFAULT 0,
+    total_win_count    INT UNSIGNED     NOT NULL DEFAULT 0,
+    total_score        INT UNSIGNED     NOT NULL DEFAULT 0,
+    today_game_count   INT UNSIGNED     NOT NULL DEFAULT 0,
+    today_win_count    INT UNSIGNED     NOT NULL DEFAULT 0,
+    today_score        INT UNSIGNED     NOT NULL DEFAULT 0,
+    today_date         DATE             NOT NULL,           -- rps_user_play_info 와 같은 "지연 초기화" 규칙
+    PRIMARY KEY (userid),
+    CONSTRAINT fk_stepping_play_userid FOREIGN KEY (userid) REFERENCES user_partner_info (userid)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 점핑 일일 랭킹
+CREATE TABLE IF NOT EXISTS stepping_rank_daily (
+    date_game  DATE         NOT NULL,
+    userid     VARCHAR(255) NOT NULL,
+    score      INT          NOT NULL DEFAULT 0,
+    updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (date_game, userid),
+    KEY idx_stepping_rank_daily_score (date_game, score)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 점핑 주간 랭킹
+CREATE TABLE IF NOT EXISTS stepping_rank_weekly (
+    date_start DATE         NOT NULL,
+    userid     VARCHAR(255) NOT NULL,
+    score      INT          NOT NULL DEFAULT 0,
+    updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (date_start, userid),
+    KEY idx_stepping_rank_weekly_score (date_start, score)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

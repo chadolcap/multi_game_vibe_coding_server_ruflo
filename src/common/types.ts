@@ -82,6 +82,13 @@ export const MessageType = {
     TURN_START: "TURN_START",                         // S→C { turn: userid, can: [{x,y}] } — can 은 시트에 없는 확장(놓을 수 있는 자리)
     TURN_REMAIN_TIME: "TURN_REMAIN_TIME",             // S→C { count } — 턴 남은 초를 1초 단위로 전달
     GAME_STATUS: "GAME_STATUS",                       // S→C { select, status0, status1 } — 게임 중 재접속한 **그 유저에게만** 보내는 보드 스냅샷
+                                                      // (점핑은 같은 이름으로 { map, count?, player1, player2 } — steppingTypes.ts)
+
+    // 점핑(stepping) 전용 (2026-10-14, payload 는 game/stepping/steppingTypes.ts). 엑셀본 `stepping` 시트 기준.
+    // ⚠️ 시트는 MAP_SEELCT 로 오타가 나 있다 — 와이어 이름은 MAP_SELECT 로 정했다(시트 수정 필요).
+    MAP_SELECT: "MAP_SELECT",                         // S→C { map: 1~3 } — 양쪽 READY 후 맵 지정
+    GAME_REMAIN_TIME: "GAME_REMAIN_TIME",             // S→C { count } — GAME_START 이후 게임 남은 초 (59 … 0)
+    MOVE_INFO: "MOVE_INFO",                           // C→S { count, location:{x,y}, save:"yes"|"no" } / S→C 같은 type 에 userid, life 추가
 
     // 공통
     ERROR: "ERROR",                       // S→C

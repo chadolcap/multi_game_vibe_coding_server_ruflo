@@ -56,6 +56,10 @@ describe("ALL_GAME_TYPES / IsGameType", () => {
         assert.equal(channelNames.IsGameType("othello"), true);
     });
 
+    it("지원하는 게임 목록에 stepping 이 있다 (2026-10-14 점핑 추가)", () => {
+        assert.equal(channelNames.IsGameType("stepping"), true);
+    });
+
     it("목록에 있는 값만 통과시킨다 (관리자/로비 메시지의 game 런타임 검사용)", () => {
         for (const game of channelNames.ALL_GAME_TYPES) {
             assert.equal(channelNames.IsGameType(game), true, `${game} 가 거부됐다`);
@@ -67,6 +71,7 @@ describe("ALL_GAME_TYPES / IsGameType", () => {
         assert.equal(channelNames.IsGameType(""), false);
         assert.equal(channelNames.IsGameType("RPS"), false); // 대소문자 구분
         assert.equal(channelNames.IsGameType("OTHELLO"), false);
+        assert.equal(channelNames.IsGameType("STEPPING"), false);
         assert.equal(channelNames.IsGameType(undefined), false);
         assert.equal(channelNames.IsGameType(1), false);
     });
@@ -77,6 +82,7 @@ describe("ParseGameTypeFromRoomName", () => {
         assert.equal(channelNames.ParseGameTypeFromRoomName("rps_1"), "rps");
         assert.equal(channelNames.ParseGameTypeFromRoomName("othello_1"), "othello");
         assert.equal(channelNames.ParseGameTypeFromRoomName("othello_3"), "othello");
+        assert.equal(channelNames.ParseGameTypeFromRoomName("stepping_1"), "stepping");
     });
 
     it("게임 룸이 아니면 undefined 다", () => {

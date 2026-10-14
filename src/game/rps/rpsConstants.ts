@@ -6,6 +6,7 @@
 export const RPS_CHOICE_TIMEOUT_SEC = 10;           // 가위바위보 선택 제한 (지나면 자동 선택)
 export const RPS_GAME_START_DELAY_SEC = 5;          // GAME_START 전송 후 첫 판 ONE_START 까지 대기 (클라이언트 연출 시간 확보)
 export const RPS_ONE_RESULT_DELAY_SEC = 5;          // 2번째 판부터: ONE_RESULT 전송 후 다음 ONE_START 까지 대기 (결과 연출 시간 확보)
+export const RPS_LAST_RESULT_DELAY_SEC = 3;         // 마지막 판 ONE_RESULT 전송 후 GAME_RESULT 까지 대기 (마지막 판 결과 연출 시간 확보)
 export const RPS_REMATCH_CHOICE_TIMEOUT_SEC = 10;   // 재게임/나가기 선택 제한 (지나면 나가기)
 
 export const RPS_WIN_COUNT_TO_FINISH = 2;           // 2선승제

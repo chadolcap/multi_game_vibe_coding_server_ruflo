@@ -1,6 +1,6 @@
 # 프로젝트 개요
 
-상업용 실시간 2인 대전 보드게임 서버입니다. 지금 들어 있는 게임은 **가위바위보(RPS)**와 **오델로** 두 가지입니다.
+상업용 실시간 2인 대전 보드게임 서버입니다. 지금 들어 있는 게임은 **가위바위보(RPS)**, **오델로**, **점핑(stepping)** 세 가지입니다.
 Colyseus 위에서 도는 Node.js/TypeScript 서버이고, 이 파일은 Claude Code 가 매 세션 읽는 **현재 기준 설계서**입니다.
 
 > 📦 2026-10-13 이전의 상세한 변경 경위는 `docs/archive/CLAUDE_2026-10-13.md` 에 원본 그대로 있습니다.
@@ -32,6 +32,7 @@ flowchart TB
     C -.-> L2[lobby_2 · 6012]
     L1 -->|MATCH_FOUND<br/>좌석 예약| R1[rps_1 · 6021]
     L1 -->|MATCH_FOUND<br/>좌석 예약| O1[othello_1 · 6031]
+    L1 -->|MATCH_FOUND<br/>좌석 예약| S1[stepping_1 · 6041]
     subgraph Redis[Redis 6780 — 모든 채널 공유]
         P[방 목록 · 좌석 예약<br/>Colyseus Presence/Driver]
         H[채널 하트비트 · 기다리는 방<br/>activeGame · 유저 캐시 · 랭킹 ZSET]
@@ -41,7 +42,8 @@ flowchart TB
     L1 --- Redis
     R1 --- Redis
     O1 --- Redis
-    R1 & O1 --> DB[(MySQL)]
+    S1 --- Redis
+    R1 & O1 & S1 --> DB[(MySQL)]
     L1 --> DB
 ```
 
@@ -55,9 +57,10 @@ flowchart TB
 | 로비 | `lobby_N` | 6011, 6012 | 2 / **1** |
 | 가위바위보 | `rps_N` | 6021~6023 | 3 / **1** |
 | 오델로 | `othello_N` | 6031~6033 | 3 / **1** |
+| 점핑 | `stepping_N` | 6041~6043 | 3 / **1** |
 
 - ⚠️ **Watcher 가 6000 이 아닌 이유**: 6000 은 브라우저 fetch 의 금지 포트(`ERR_UNSAFE_PORT`)라 관리자 페이지가 접속할 수 없습니다.
-- 게임 채널 수는 코드 상수(`RPS_CHANNEL_COUNT`, `OTHELLO_CHANNEL_COUNT` = 1)로 묶여 있습니다. 늘리려면 상수를 올리고 재빌드한 뒤 로비도 재시작해야 합니다.
+- 게임 채널 수는 코드 상수(`RPS_CHANNEL_COUNT`, `OTHELLO_CHANNEL_COUNT`, `STEPPING_CHANNEL_COUNT` = 1)로 묶여 있습니다. 늘리려면 상수를 올리고 재빌드한 뒤 로비도 재시작해야 합니다.
 - 로비 채널 수는 `.env` 의 `LOBBY_PORTS` 목록 길이로 정해집니다. 코드는 고치지 않고 `node dist/index.js lobby 3` 처럼 띄우기만 하면 됩니다. 다만 클라이언트가 새 포트를 알아야 실제로 유저가 들어옵니다.
 
 ### 규모 스펙
@@ -76,16 +79,16 @@ flowchart TB
 ```powershell
 npm run redis            # ① Redis 먼저 (종료는 redis-cli -p 6780 SHUTDOWN SAVE)
 npm run build            # ② 코드가 바뀔 때마다
-npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 (지금 개발 정책)
+npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_1 (지금 개발 정책)
 ```
 
 | 명령 | 용도 |
 |---|---|
-| `npm run start:lobby1` / `start:rps1` / `start:othello1` | 채널 하나만 터미널에서 실행 |
+| `npm run start:lobby1` / `start:rps1` / `start:othello1` / `start:stepping1` | 채널 하나만 터미널에서 실행 |
 | `npm run pm2:start` | 운영 규모 전체 (게임 채널 상수를 먼저 올려야 함) |
 | `npm run pm2:status` / `pm2:logs` / `pm2:stop` / `pm2:restart` | 상태 / 로그 / graceful 정지 / 재시작 |
 | `npm run db:init` | DB 생성 + 스키마 + 이번 달 로그 테이블 (여러 번 실행해도 안전) |
-| `npm test` | 단위 테스트 (113개) |
+| `npm test` | 단위 테스트 (136개) |
 
 - PM2 설정은 `ecosystem.config.cjs` 입니다. PM2 가 `require()` 로 읽기 때문에 `.cjs` 여야 합니다.
 - `kill_timeout` 은 **12분**입니다. 게임 채널의 드레인(최대 10분)보다 짧으면 무중단 재시작이 무의미해집니다.
@@ -100,7 +103,7 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 (지금 개
 
 ```
 src/
-  index.ts                  진입점 — node dist/index.js <watcher|lobby|rps|othello> <번호>
+  index.ts                  진입점 — node dist/index.js <watcher|lobby|rps|othello|stepping> <번호>
   common/                   플랫폼 공용
     config.ts               .env 로딩            constants.ts   플랫폼 상수
     channelNames.ts         룸 이름/포트 규칙, GameType, ALL_GAME_TYPES, IsGameType
@@ -118,16 +121,17 @@ src/
       activeGame.ts         userid → 게임 중인 방 (F5 재접속용)
     rps/                    RpsGameRoom · rpsRules(순수 함수) · rpsTypes · rpsConstants
     othello/                OthelloGameRoom · othelloRules(순수 함수) · othelloTypes · othelloConstants
+    stepping/               SteppingGameRoom · steppingRules(순수 함수) · steppingTypes · steppingConstants
   db/
     connection.ts / redis.ts / initDb.ts / schema.sql
     userRepository.ts       유저 조회의 유일한 입구 (Redis → DB → 신규 등록)
     userCache.ts            user:info:{userid} (TTL 120초, phone 없음)
     playInfoRepository.ts   게임별 통계 user:play:{game}:{userid}
-    {rps,othello}GameResultRepository.ts / {rps,othello}GameLogSchema.ts
+    {rps,othello,stepping}GameResultRepository.ts / {rps,othello,stepping}GameLogSchema.ts
     rankingRepository.ts / rankingZSet.ts
     channelHeartbeat.ts     채널 생존 + 담당 processId + 닫는 중 표시
     channelUsers.ts / noticePubSub.ts
-    queries/                테이블별 SQL (userInfo, userPlayInfo, userRegistration, {rps,othello}GameLog, ranking …)
+    queries/                테이블별 SQL (userInfo, userPlayInfo, userRegistration, {rps,othello,stepping}GameLog, ranking …)
 scripts/
   colyseus-test-client.mjs  검증용 최소 Colyseus 클라이언트 (SDK 없이 matchmake → WS → msgpack)
   check-*.mjs               실서버 검증 스크립트 (아래 10장)
@@ -208,13 +212,14 @@ flowchart LR
     OS --> T{선택 대기<br/>ONE_REMAIN_TIME 9…0}
     T -->|둘 다 선택 / 0초 자동선택| R[ONE_RESULT]
     R -->|무승부 or 2승 전| D[5초] --> OS
-    R -->|누군가 2승| GR[GAME_RESULT]
+    R -->|누군가 2승| L3[3초] --> GR[GAME_RESULT]
 ```
 
 | 항목 | 값 |
 |---|---|
 | 승리 조건 | **2선승** (무승부는 판 수에 넣지 않고 다시) |
 | 선택 제한 | 10초, 넘으면 서버가 랜덤 선택 |
+| 마지막 판 연출 | 마지막 `ONE_RESULT` 뒤 **3초** 후 `GAME_RESULT`(`RPS_LAST_RESULT_DELAY_SEC`). 그동안은 아직 게임 중으로 취급. 둘 다 나가면 기다리지 않음 |
 | 점수 | 2:0 승리 **20점**, 2:1 승리 **10점**, 패자 0점 (승-무-승도 2:0) |
 | 봇/자동 진행 | 점수를 원래 유저에게 그대로 반영 |
 
@@ -237,6 +242,31 @@ flowchart LR
 | 패스 | 별도 메시지 없음 — 같은 `turn` 이 연속으로 오면 상대가 패스한 것 |
 | 종료 | 양쪽 모두 놓을 곳이 없을 때. 돌이 많은 쪽이 승리, 같으면 `draw:"Y"` |
 | 점수 | 승리 **20점**, 패배·무승부 0점 |
+
+### 6-3-1. 점핑 (stepping)
+
+두 유저가 **같은 맵**에서 각자 자기 블록을 점프합니다(화면은 나란히). 착지 판정은 클라이언트가 하고, 서버는 `MOVE_INFO` 를 검증·중계하고 승패를 냅니다.
+
+```mermaid
+flowchart LR
+    RD[양쪽 READY] --> MS[MAP_SELECT map:1~3]
+    MS -->|2초| GS[GAME_START]
+    GS --> P{60초 동안<br/>GAME_REMAIN_TIME 59…0<br/>양쪽 동시에 MOVE_INFO}
+    P -->|라이프 0 에서 추락 / 60초 / 양쪽 완주| W3[3초] --> GR[GAME_RESULT]
+```
+
+| 항목 | 값 |
+|---|---|
+| 맵 | 서버가 1~3 중 랜덤, 양쪽 같은 맵. 맵별 칸 수는 `STEPPING_MAP_BLOCK_COUNTS` — ⚠️ **지금은 임시값 100** |
+| 라이프 | 3개. 추락하면 1개 쓰고 앞 블록 중앙(0,0)에서 재시작(연출은 클라이언트). **0개에서 또 추락(4번째)하면 게임 종료** |
+| 종료 | 한 명이라도 탈락 / **60초** 경과(시트는 20초, 사용자 결정으로 변경) / 양쪽 모두 모든 칸 완주 / 둘 다 나감 |
+| 결과 연출 | 종료 조건이 된 뒤 **3초** 후 `GAME_RESULT`(`STEPPING_RESULT_DELAY_SEC`, 마지막 추락 모션용). 그동안 `MOVE_INFO`·카운트다운은 멈추지만 게임 중으로 취급. 둘 다 나가면 기다리지 않음 |
+| 승패 | 게임 점수 = 남은 라이프×10 + 칸 수×5. 같으면 **그 칸에 먼저 도착한 쪽**. 둘 다 0칸이면 `draw:"Y"` |
+| 랭킹 점수 | 승리 **20점**, 패배·무승부 0점 (게임 점수와 별개, 로그 `vs` 에만 게임 점수가 남음) |
+| `count` 검증 | **직전 값 + 1** 만 받음(추락도 같은 칸 번호). 재전송·건너뛰기·150ms 안 연타는 조용히 무시 + 서버 로그 |
+| 게임 중 끊김/퇴장 | 서버가 대신 뛸 수 없으므로 **그 유저 기록이 멈춤**. 좌석은 유지, 남은 유저는 계속. `OUT_USER` 는 `GAME_RESULT` 직후. 재접속하면 `GAME_STATUS` 로 이어서 뜀 |
+
+- ⚠️ `count` 순번 검사에 한 번 걸리면 그 클라이언트의 다음 값도 계속 어긋납니다. 클라이언트는 **서버가 중계한 `MOVE_INFO` 의 count** 를 기준으로 다음 값을 정해야 합니다.
 
 ### 6-4. 끊김 · 퇴장 · 재접속 ⭐
 
@@ -292,7 +322,7 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 
 ## 7. 통신 프로토콜
 
-> 📄 **기준 문서는 구글 시트**(로컬 엑셀본 `멀티게임_바이브.xlsx` 의 `lobby` / `rps` / `othello` / `관리자` 시트)입니다.
+> 📄 **기준 문서는 구글 시트**(로컬 엑셀본 `멀티게임_바이브.xlsx` 의 `lobby` / `rps` / `othello` / `stepping` / `관리자` 시트)입니다.
 > https://docs.google.com/spreadsheets/d/1zmxIhBU8UsEiI4cFFBs94Y4gNfsl1QbINjZMGQwNzBQ
 > 시트에 있는 메시지는 시트가 우선이고, 시트에 없는 것(🔸 표시)만 이 문서가 기준입니다.
 
@@ -360,6 +390,16 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 | SELECT_GAME | C→S / S→C | `{select:{x,y}}` / `{select:{userid,x,y}, change:[{x,y}…]}` | 자동 착수도 같은 모양 |
 | GAME_STATUS | S→C | `{select, status0, status1, turn?, can?}` | 재접속 당사자에게만. `turn`/`can` 🔸 은 턴 공백(2초)이거나 **본인 자동 턴**이면 생략 |
 | GAME_RESULT | S→C | `{winner, loser, draw?:"Y"}` | `win_count` = **최종 돌 개수**, `draw` 🔸 |
+
+### 7-5-1. 점핑
+
+| type | 방향 | payload | 비고 |
+|---|---|---|---|
+| MAP_SELECT | S→C | `{map}` | ⚠️ 시트는 `MAP_SEELCT` 오타. 와이어 이름은 `MAP_SELECT` |
+| GAME_REMAIN_TIME | S→C | `{count}` | 59 … 0 (제한 60초) |
+| MOVE_INFO | C→S / S→C | `{count, location:{x,y}, save:"yes"/"no"}` / 같은 값 + `userid`, `life`🔸 | 받아들인 것만 **양쪽 모두**에게 중계 |
+| GAME_STATUS 🔸 | S→C | `{map, count?, player1, player2}` — player = `{userid, count, life, location}` | 재접속 당사자에게만. 시트 행은 오델로 것이 복사돼 있어 새로 정함. `count`(남은 초)는 GAME_START 전이면 생략 |
+| GAME_RESULT | S→C | `{winner, loser, draw?}` — `{userid, win_count, win_per, score🔸, life🔸}` | `win_count` = 이동한 칸 수, `score` = 게임 점수 |
 
 ### 7-6. 관리자 (Watcher)
 
@@ -447,6 +487,7 @@ erDiagram
     user_partner_info ||--|| user_member_info : userid
     user_partner_info ||--|| rps_user_play_info : userid
     user_partner_info ||--|| othello_user_play_info : userid
+    user_partner_info ||--|| stepping_user_play_info : userid
     user_partner_info {
         varchar userid PK
         varchar partner
@@ -475,6 +516,7 @@ erDiagram
 | `{game}_rank_daily` / `_weekly` | `(date_game 또는 date_start, userid, score)` |
 | `rps_game_log_YYYY_MM` | `start_time, end_time, win, lose, vs("2:0"/"2:1"), score(20/10), plays, win_is_bot, lose_is_bot` |
 | `othello_game_log_YYYY_MM` | 위와 같고 `vs`=돌 수(`"45:19"`), `score`=20/0, `plays`=`[{userid,x,y}…]`, `is_draw` 추가 |
+| `stepping_game_log_YYYY_MM` | 오델로와 같고 `map` 추가, `vs`=게임 점수(`"30:15"`), `plays`=`[{userid,count,x,y,save}…]`(받아들인 MOVE_INFO 만) |
 
 - RPS `plays` 는 `[{ "userid1": "가위", "userid2": "보" }, …]` 이고 무승부 판도 포함합니다(2026-10-02 이전 로그는 옛 형식).
 - 오델로 무승부는 `win`/`lose` 에 player1/player2 를 넣고 `is_draw=1` 로 구분합니다.
@@ -495,6 +537,7 @@ erDiagram
 | `check-othello-reconnect.mjs` | 재접속 + `GAME_STATUS` | 17/17 |
 | `check-othello-abandon.mjs` | 퇴장 · 자동 2초 · 재입장 · OUT_USER 시점 | consent/drop 각 41/41 |
 | `check-rps-abandon.mjs` | 퇴장 · 즉시 판정 · 둘 다 퇴장 | consent/drop 각 37/37 |
+| `check-stepping-game.mjs` | 매칭 → 맵 → MOVE_INFO 검증(무시 3종) → 4번째 추락 종료 → 결과 3초 대기 → 재게임 + 퇴장 → 60초 종료 → OUT_USER → DB | 34/34 (수정 전 빌드에서 3초 대기 2건 실패 확인) |
 | `check-admin-login.mjs` / `check-send-notice.mjs` / `check-enter-lobby.mjs` | 관리자 보안 / 공지 필터 / 로비 payload | 통과 |
 
 **쓸 때 지킬 것**
@@ -569,4 +612,6 @@ erDiagram
 | 파트너사 토큰 검증 | 상용 오픈 전 필수 |
 | 매칭 폭주(완전 동시 200명+) 순차 처리 병목, 100번째 방 경계 경합 | 알려진 한계, 보류 |
 | 매칭 게임 채널 B안(`ip`/`port` 직접 전달) | 사용자가 나중에 바꿀 수 있음. 바꾸면 좌석 예약의 "이 자리는 이 유저" 보장을 다시 설계해야 함 |
-| 엑셀 시트 반영 (사용자 작업) | `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |
+| 점핑 맵별 칸 수 | `STEPPING_MAP_BLOCK_COUNTS` 가 임시값(100). 실제 맵 데이터 받으면 교체 |
+| 점핑 재접속(`GAME_STATUS`) 실서버 검증 | 단위 수준만. `check-stepping-reconnect.mjs` 미작성 |
+| 엑셀 시트 반영 (사용자 작업) | 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |

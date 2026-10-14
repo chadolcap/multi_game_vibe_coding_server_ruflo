@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 import { config } from "../common/config.js";
 import * as othelloGameLogSchema from "./othelloGameLogSchema.js";
+import * as steppingGameLogSchema from "./steppingGameLogSchema.js";
 import * as userRegistration from "./queries/userRegistration.js";
 import * as rpsGameLogSchema from "./rpsGameLogSchema.js";
 
@@ -79,6 +80,9 @@ async function EnsureCurrentMonthGameLogs(): Promise<void> {
 
     const othello_table = await othelloGameLogSchema.EnsureOthelloGameLogTable(pool, now);
     console.log(`[db:init] 이번 달 오델로 게임 로그 테이블 확인/생성 완료: ${othello_table}`);
+
+    const stepping_table = await steppingGameLogSchema.EnsureSteppingGameLogTable(pool, now);
+    console.log(`[db:init] 이번 달 점핑 게임 로그 테이블 확인/생성 완료: ${stepping_table}`);
 }
 
 // 게임이 추가되기 전에 가입한 유저에게 그 게임의 통계 행을 채워 넣는다.

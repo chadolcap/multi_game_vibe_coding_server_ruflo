@@ -1,5 +1,5 @@
 // 서버 진입점 — 실행할 때 "어떤 채널로 켤지" 를 받아 해당 포트로 서버 하나를 기동한다.
-// 사용법: node dist/index.js <watcher|lobby|rps|othello> <채널 번호>   (채널 번호는 1부터)
+// 사용법: node dist/index.js <watcher|lobby|rps|othello|stepping> <채널 번호>   (채널 번호는 1부터)
 //   예) node dist/index.js lobby 1     → lobby_1 룸, 포트 6011
 //       node dist/index.js othello 1   → othello_1 룸, 포트 6031
 // 채널 하나 = 서버 프로세스 하나 = 포트 하나 (CLAUDE.md 규모 스펙)
@@ -23,6 +23,7 @@ import * as channelUsers from "./db/channelUsers.js";
 import * as noticePubSub from "./db/noticePubSub.js";
 import { LobbyRoom } from "./game/lobby/LobbyRoom.js";
 import { OthelloGameRoom } from "./game/othello/OthelloGameRoom.js";
+import { SteppingGameRoom } from "./game/stepping/SteppingGameRoom.js";
 import { RpsGameRoom } from "./game/rps/RpsGameRoom.js";
 import { WatcherRoom } from "./watch/WatcherRoom.js";
 
@@ -116,6 +117,7 @@ async function Main(): Promise<void> {
         const GAME_ROOM_CLASSES = {
             rps: RpsGameRoom,
             othello: OthelloGameRoom,
+            stepping: SteppingGameRoom,
         } as const;
         server.define(room_name, GAME_ROOM_CLASSES[channel_type]);
 
