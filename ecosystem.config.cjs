@@ -57,5 +57,9 @@ module.exports = {
         Channel("stepping_1", "stepping", 1),
         Channel("stepping_2", "stepping", 2),
         Channel("stepping_3", "stepping", 3),
+        // 에어하키 (2026-10-15 추가, 포트 6051~6053)
+        Channel("airhockey_1", "airhockey", 1),
+        Channel("airhockey_2", "airhockey", 2),
+        Channel("airhockey_3", "airhockey", 3),
     ],
 };

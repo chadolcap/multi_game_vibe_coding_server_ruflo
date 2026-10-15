@@ -85,7 +85,7 @@ async function CleanupTestRows() {
         for (const row of rows) console.log(`  ${row.userid}`);
 
         // FK 가 user_partner_info 를 참조하므로 자식 테이블부터 지운다.
-        for (const table of ["rps_user_play_info", "user_member_info", "user_partner_info"]) {
+        for (const table of ["rps_user_play_info", "othello_user_play_info", "stepping_user_play_info", "airhockey_user_play_info", "user_member_info", "user_partner_info"]) {
             const [result] = await pool.query(
                 `DELETE FROM ${table} WHERE userid IN (SELECT userid FROM (SELECT userid FROM user_partner_info WHERE partner = ?) AS t)`,
                 [TEST_PARTNER]

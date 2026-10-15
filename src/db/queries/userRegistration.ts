@@ -11,7 +11,12 @@ import type { NewUserInput } from "../types.js";
 
 // 가입 시 통계 행을 만들 테이블 목록. 이름 규칙은 `{게임}_user_play_info` 다
 // (common/channelNames.ts 의 ALL_GAME_TYPES 와 1:1 로 맞춰야 한다).
-const GAME_PLAY_INFO_TABLES = ["rps_user_play_info", "othello_user_play_info", "stepping_user_play_info"] as const;
+const GAME_PLAY_INFO_TABLES = [
+    "rps_user_play_info",
+    "othello_user_play_info",
+    "stepping_user_play_info",
+    "airhockey_user_play_info",
+] as const;
 
 // user_partner_info / user_member_info / 각 게임의 *_user_play_info 에 기본 정보를 넣는다.
 // INSERT IGNORE 를 쓰므로 (partner, mid) 가 이미 있으면(동시 호출 등) 조용히 넘어간다 — 에러 아님.

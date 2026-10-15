@@ -1,6 +1,6 @@
 # 프로젝트 개요
 
-상업용 실시간 2인 대전 보드게임 서버입니다. 지금 들어 있는 게임은 **가위바위보(RPS)**, **오델로**, **점핑(stepping)** 세 가지입니다.
+상업용 실시간 2인 대전 보드게임 서버입니다. 지금 들어 있는 게임은 **가위바위보(RPS)**, **오델로**, **점핑(stepping)**, **에어하키(airhockey)** 네 가지입니다.
 Colyseus 위에서 도는 Node.js/TypeScript 서버이고, 이 파일은 Claude Code 가 매 세션 읽는 **현재 기준 설계서**입니다.
 
 > 📦 2026-10-13 이전의 상세한 변경 경위는 `docs/archive/CLAUDE_2026-10-13.md` 에 원본 그대로 있습니다.
@@ -33,6 +33,7 @@ flowchart TB
     L1 -->|MATCH_FOUND<br/>좌석 예약| R1[rps_1 · 6021]
     L1 -->|MATCH_FOUND<br/>좌석 예약| O1[othello_1 · 6031]
     L1 -->|MATCH_FOUND<br/>좌석 예약| S1[stepping_1 · 6041]
+    L1 -->|MATCH_FOUND<br/>좌석 예약| A1[airhockey_1 · 6051]
     subgraph Redis[Redis 6780 — 모든 채널 공유]
         P[방 목록 · 좌석 예약<br/>Colyseus Presence/Driver]
         H[채널 하트비트 · 기다리는 방<br/>activeGame · 유저 캐시 · 랭킹 ZSET]
@@ -43,7 +44,8 @@ flowchart TB
     R1 --- Redis
     O1 --- Redis
     S1 --- Redis
-    R1 & O1 & S1 --> DB[(MySQL)]
+    A1 --- Redis
+    R1 & O1 & S1 & A1 --> DB[(MySQL)]
     L1 --> DB
 ```
 
@@ -58,9 +60,10 @@ flowchart TB
 | 가위바위보 | `rps_N` | 6021~6023 | 3 / **1** |
 | 오델로 | `othello_N` | 6031~6033 | 3 / **1** |
 | 점핑 | `stepping_N` | 6041~6043 | 3 / **1** |
+| 에어하키 | `airhockey_N` | 6051~6053 | 3 / **1** |
 
 - ⚠️ **Watcher 가 6000 이 아닌 이유**: 6000 은 브라우저 fetch 의 금지 포트(`ERR_UNSAFE_PORT`)라 관리자 페이지가 접속할 수 없습니다.
-- 게임 채널 수는 코드 상수(`RPS_CHANNEL_COUNT`, `OTHELLO_CHANNEL_COUNT`, `STEPPING_CHANNEL_COUNT` = 1)로 묶여 있습니다. 늘리려면 상수를 올리고 재빌드한 뒤 로비도 재시작해야 합니다.
+- 게임 채널 수는 코드 상수(`RPS_CHANNEL_COUNT`, `OTHELLO_CHANNEL_COUNT`, `STEPPING_CHANNEL_COUNT`, `AIRHOCKEY_CHANNEL_COUNT` = 1)로 묶여 있습니다. 늘리려면 상수를 올리고 재빌드한 뒤 로비도 재시작해야 합니다.
 - 로비 채널 수는 `.env` 의 `LOBBY_PORTS` 목록 길이로 정해집니다. 코드는 고치지 않고 `node dist/index.js lobby 3` 처럼 띄우기만 하면 됩니다. 다만 클라이언트가 새 포트를 알아야 실제로 유저가 들어옵니다.
 
 ### 규모 스펙
@@ -79,16 +82,16 @@ flowchart TB
 ```powershell
 npm run redis            # ① Redis 먼저 (종료는 redis-cli -p 6780 SHUTDOWN SAVE)
 npm run build            # ② 코드가 바뀔 때마다
-npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_1 (지금 개발 정책)
+npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_1 + airhockey_1 (지금 개발 정책)
 ```
 
 | 명령 | 용도 |
 |---|---|
-| `npm run start:lobby1` / `start:rps1` / `start:othello1` / `start:stepping1` | 채널 하나만 터미널에서 실행 |
+| `npm run start:lobby1` / `start:rps1` / `start:othello1` / `start:stepping1` / `start:airhockey1` | 채널 하나만 터미널에서 실행 |
 | `npm run pm2:start` | 운영 규모 전체 (게임 채널 상수를 먼저 올려야 함) |
 | `npm run pm2:status` / `pm2:logs` / `pm2:stop` / `pm2:restart` | 상태 / 로그 / graceful 정지 / 재시작 |
 | `npm run db:init` | DB 생성 + 스키마 + 이번 달 로그 테이블 (여러 번 실행해도 안전) |
-| `npm test` | 단위 테스트 (136개) |
+| `npm test` | 단위 테스트 (184개) |
 
 - PM2 설정은 `ecosystem.config.cjs` 입니다. PM2 가 `require()` 로 읽기 때문에 `.cjs` 여야 합니다.
 - `kill_timeout` 은 **12분**입니다. 게임 채널의 드레인(최대 10분)보다 짧으면 무중단 재시작이 무의미해집니다.
@@ -103,7 +106,7 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 
 ```
 src/
-  index.ts                  진입점 — node dist/index.js <watcher|lobby|rps|othello|stepping> <번호>
+  index.ts                  진입점 — node dist/index.js <watcher|lobby|rps|othello|stepping|airhockey> <번호>
   common/                   플랫폼 공용
     config.ts               .env 로딩            constants.ts   플랫폼 상수
     channelNames.ts         룸 이름/포트 규칙, GameType, ALL_GAME_TYPES, IsGameType
@@ -122,16 +125,17 @@ src/
     rps/                    RpsGameRoom · rpsRules(순수 함수) · rpsTypes · rpsConstants
     othello/                OthelloGameRoom · othelloRules(순수 함수) · othelloTypes · othelloConstants
     stepping/               SteppingGameRoom · steppingRules(순수 함수) · steppingTypes · steppingConstants
+    airhockey/              AirhockeyGameRoom · airhockeyRules(물리·봇, 순수 함수) · airhockeyTypes · airhockeyConstants
   db/
     connection.ts / redis.ts / initDb.ts / schema.sql
     userRepository.ts       유저 조회의 유일한 입구 (Redis → DB → 신규 등록)
     userCache.ts            user:info:{userid} (TTL 120초, phone 없음)
     playInfoRepository.ts   게임별 통계 user:play:{game}:{userid}
-    {rps,othello,stepping}GameResultRepository.ts / {rps,othello,stepping}GameLogSchema.ts
+    {rps,othello,stepping,airhockey}GameResultRepository.ts / {…}GameLogSchema.ts
     rankingRepository.ts / rankingZSet.ts
     channelHeartbeat.ts     채널 생존 + 담당 processId + 닫는 중 표시
     channelUsers.ts / noticePubSub.ts
-    queries/                테이블별 SQL (userInfo, userPlayInfo, userRegistration, {rps,othello,stepping}GameLog, ranking …)
+    queries/                테이블별 SQL (userInfo, userPlayInfo, userRegistration, {rps,othello,stepping,airhockey}GameLog, ranking …)
 scripts/
   colyseus-test-client.mjs  검증용 최소 Colyseus 클라이언트 (SDK 없이 matchmake → WS → msgpack)
   check-*.mjs               실서버 검증 스크립트 (아래 10장)
@@ -187,7 +191,7 @@ sequenceDiagram
 
 ## 6. 게임 규칙
 
-### 6-1. 공통 (두 게임 모두)
+### 6-1. 공통 (모든 게임)
 
 | 항목 | 규칙 |
 |---|---|
@@ -268,6 +272,45 @@ flowchart LR
 
 - ⚠️ `count` 순번 검사에 한 번 걸리면 그 클라이언트의 다음 값도 계속 어긋납니다. 클라이언트는 **서버가 중계한 `MOVE_INFO` 의 count** 를 기준으로 다음 값을 정해야 합니다.
 
+### 6-3-2. 에어하키 (airhockey)
+
+**서버가 퍽 물리를 직접 계산**합니다(60Hz, `airhockeyRules.StepWorld`). 클라이언트는 자기 레버 좌표만 보내고, 서버가 30Hz 로 퍽 위치와 상대 레버 위치를 보냅니다.
+
+```mermaid
+flowchart LR
+    RD[양쪽 READY] --> GS[GAME_START]
+    GS -->|3초| OS[ONE_START<br/>퍽 중앙 정지]
+    OS --> P{PUCK_MOVE / LEVER_MOVE<br/>30Hz}
+    P -->|골| OR[ONE_RESULT win, win_count]
+    OR -->|3골 전, 3초| OS
+    P -->|퍽이 10초간 제자리<br/>재시작 3번까지| OS
+    P -->|재시작 3번 뒤 또 정체| GI[즉시 GAME_RESULT draw:Y<br/>→ 재게임 선택, 기록 없음]
+    OR -->|3골, 3초| GR[GAME_RESULT]
+```
+
+| 항목 | 값 |
+|---|---|
+| 좌표계 | 원점 = 테이블 중앙, x 오른쪽 · y 위쪽. **좌표는 항상 받는/보내는 유저 기준(내 골대가 아래)**. 서버 내부는 player1 아래 · player2 위 절대 좌표이고 player2 와는 `(x,y)→(-x,-y)` |
+| 테이블 | 720×1280, 골대 입구 260, 퍽 반지름 30, 레버 반지름 60 — ⚠️ **임시값**, 클라이언트와 반드시 같아야 함. 영상의 꺾인 옆벽은 연출, 충돌은 직사각형(사용자 결정) |
+| 레버 | 자기 쪽 절반 안으로 잘라서 받음(중앙선 못 넘음). 서버 레버는 `LEVER_MOVE` 도착 간격(이동평균)을 재서 **다음 입력이 올 때쯤 도착하는 일정한 속도**로 따라감 = 서버 레버 속도가 손 속도. 상한 3000/초(순간이동 조작 방지) |
+| 타격 | 유한 질량 충돌식: 퍽 법선 속도 변화 = `-(1+e)·M/(M+1)·상대속도`, e=0.65, M=4 → 멈춘 퍽을 V 로 치면 **약 1.3V**. 퍽 상한 2800 |
+| 시작 / 선공 | 매 판 퍽은 중앙(0,0)에 멈춘 채 시작, 먼저 친 쪽이 선공(시트) |
+| 판 시작 레버 | `ONE_START` 때 레버의 **이전 궤적(속도·따라가던 목표·입력 간격)을 버리고** 그 자리에 멈춤. 그 판의 **첫 `LEVER_MOVE` 는 그 좌표에 바로 놓고(속도 0)**, 두 번째부터 평소처럼 따라감(사용자 결정, `ResetLeverMotion`/`SnapLever`). 퍽 위에 놓여도 치지 않고 밀어내기만 함 |
+| 승리 | **3골 선취**. 제한 시간 없음(사용자 결정). 무승부(`draw:"Y"`)는 ① 둘 다 나갔는데 골 수가 같을 때 ② 정체 무효일 때뿐 |
+| 퍽 정체 | 퍽이 **10초** 동안 처음 자리에서 반경 30 밖으로 못 나가면 골 없이 **이번 판만 다시**(점수 유지, `ONE_START` 부터). 레버 사이·구석 끼임, 퍽 독점을 함께 막음(사용자 결정, `AIRHOCKEY_STUCK_*`) |
+| 정체 무효 | 골 없이 정체 재시작을 **3번** 한 뒤 또 정체되면(4번째) **게임 무효** — **즉시** `GAME_RESULT{draw:"Y"}`(winner/loser = player1/player2, score 0, win_per 미반영) → 일반 결과와 같은 10초 재게임 선택. 별도 알림 메시지 없음(`GAME_INVALID` 는 사용자 결정으로 제거). DB 로그·통계·랭킹 없음. 골이 나면 횟수 0. 양쪽 방치면 `GAME_START` 부터 약 43초(`AIRHOCKEY_STUCK_MAX_RESTARTS`) |
+| 랭킹 점수 | **넣은 골 수 × 5점**, 패자도 받음(사용자 결정, 시트 "1판에 5점") |
+| 끊김 / 퇴장 | 공통 자동 모드 규칙(6-4) — **서버 봇이 레버를 조종**(끊기는 즉시). 재접속하면 `GAME_STATUS` 받고 본인 조종 |
+| 둘 다 나감 | 그 시점 골 수로 즉시 종료 |
+
+- ⚠️ 봇 조준 흔들기(`AIRHOCKEY_BOT_AIM_JITTER`)를 **빼지 마세요.** 둘 다 끊겨 봇끼리 붙으면 중앙 퍽에 대칭으로 달려들어 영원히 골이 안 납니다(시뮬레이션 20/20 교착 → 흔들기 ±20 이면 0/20). 재접속 창은 게임이 끝날 때까지 열려 있어 그 방이 닫히지 않습니다.
+- ⚠️ 레버를 **최대 속도로 몰아서 목표까지 보내면 안 됩니다**(2026-10-15 수정 전 방식). 30Hz 입력은 2틱에 한 번 오므로 레버 속도가 `[0, 2V, 0, 2V …]` 로 튀어서, 같은 손놀림에도 퍽이 달라붙었다가 튕겨 나가고 손 600/초부터 모든 타격이 상한에 걸렸습니다. 단위 테스트가 이걸 못 잡은 이유는 목표를 한 번에 줬기 때문입니다 — `SwingAt()` 처럼 **2틱마다 목표를 바꿔** 시험하세요.
+- ⚠️ 봇의 "느린 퍽에 붙어 있으면 물러나기"(`AIRHOCKEY_BOT_RETREAT_*`)를 빼지 마세요. 구석에 갇힌 퍽은 레버가 닿을 수 있는 모든 자리에서 구석 쪽으로만 밀려서, 누르고만 있으면 봇끼리 영원히 못 빼냅니다(30판 중 5판 교착 → 200판 중 0판).
+- ⚠️ 물리 루프는 `this.clock.setInterval` 이 아니라 **`setSimulationInterval`** 입니다. 룸 clock 은 patch 주기로만 tick 돼서 16ms 간격이 보장되지 않습니다.
+- ⚠️ 물리 루프는 **고정 스텝 누적**(`RunSimulationSteps`)입니다. 루프 한 번 = Tick 한 번으로 두면 Windows 타이머 해상도(15.6ms) 때문에 실제로는 초당 약 34번만 돌아 **게임 전체가 57% 속도 슬로모션**이 됩니다(2026-10-15 발견 — 정체 10초가 실제 17초였음). 실제 경과 시간을 쌓아 1/60초마다 Tick 하고, 5틱 넘게 밀리면 버립니다.
+- ⚠️ 물리 루프는 **한 번 걸면 끄지 않고** `simulation_running` 플래그로만 멈춥니다. `setSimulationInterval()` 을 콜백 없이 불러 끄면 Colyseus 가 내부 핸들을 안 비워서 patch 주기의 `clock.tick()` 도 건너뛰고 **룸 clock 이 영원히 멈춥니다** — 게임이 끝난 뒤 재게임 10초 타이머가 안 울려 유저가 방에 계속 머물렀습니다(2026-10-15).
+- ⚠️ `PUCK_MOVE`/`LEVER_MOVE` 는 C↔S 로그를 남기지 않습니다(`log.ts` `HIGH_FREQUENCY_MESSAGE_TYPES`). 멈춘 퍽·레버는 바뀌었을 때만 보냅니다.
+
 ### 6-4. 끊김 · 퇴장 · 재접속 ⭐
 
 Colyseus 에서 연결이 끊기는 경로는 두 가지이고, 서버 처리가 완전히 다릅니다.
@@ -295,7 +338,7 @@ flowchart TB
 | 턴 성격 | 턴 **시작 시점에 확정**(`turn_auto`)되고 그 턴 안에서는 바뀌지 않음 |
 | 자동 턴 중 재입장 | 그 턴은 본인이 못 둔다(`SELECT_GAME` 무시). **다음 턴부터** 직접 둠 |
 | `OUT_USER` | 나가는 즉시가 아니라 **`GAME_RESULT` 직후**(`FlushAbandonedPlayers`) |
-| 둘 다 나감 | 오델로: 그 시점 돌 수로 즉시 종료. RPS: 남은 판을 지연 없이 즉시 판정(`ResolveRemainingRoundsNow`, 상한 20판) |
+| 둘 다 나감 | 오델로: 그 시점 돌 수로 즉시 종료. RPS: 남은 판을 지연 없이 즉시 판정(`ResolveRemainingRoundsNow`, 상한 20판). 점핑·에어하키: 그 시점 기록(게임 점수 / 골 수)으로 즉시 종료 |
 | DB `is_bot` | 게임이 끝날 때 `bot_sessions` 에 있으면 `win_is_bot`/`lose_is_bot` = 1. 끊김은 5초 뒤에 들어가고, **명시적 나가기는 `onLeave` 에서 즉시** 들어감. 재입장하면 빠짐 |
 | 관리자 접속자 목록 | `abandoned_sessions` 는 제외 |
 | 게임 종료 | `FinishGame` 이 남은 재접속 창을 강제로 `reject()` 함 (안 하면 방이 영원히 안 닫힘) |
@@ -316,13 +359,13 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 4. 클라이언트는 받은 값을 그대로 `client.reconnect()` 에 넘깁니다.
 
 - ⚠️ `consumeSeatReservation()` 이 아닙니다. 토큰은 반드시 `"roomId:토큰"` 형식이어야 합니다.
-- 재접속은 `onJoin` 을 다시 부르지 않습니다. 그래서 **`ENTER_ROOM` 재요청**이 상대 정보와 상태를 되찾는 유일한 경로입니다. 서버는 재요청한 클라이언트에게만 다시 보내고, 오델로는 `GAME_STATUS` 도 함께 보냅니다.
+- 재접속은 `onJoin` 을 다시 부르지 않습니다. 그래서 **`ENTER_ROOM` 재요청**이 상대 정보와 상태를 되찾는 유일한 경로입니다. 서버는 재요청한 클라이언트에게만 다시 보내고, 오델로·점핑·에어하키는 `GAME_STATUS` 도 함께 보냅니다(RPS 는 없음).
 
 ---
 
 ## 7. 통신 프로토콜
 
-> 📄 **기준 문서는 구글 시트**(로컬 엑셀본 `멀티게임_바이브.xlsx` 의 `lobby` / `rps` / `othello` / `stepping` / `관리자` 시트)입니다.
+> 📄 **기준 문서는 구글 시트**(로컬 엑셀본 `멀티게임_바이브.xlsx` 의 `lobby` / `rps` / `othello` / `stepping` / `airhockey` / `관리자` 시트)입니다.
 > https://docs.google.com/spreadsheets/d/1zmxIhBU8UsEiI4cFFBs94Y4gNfsl1QbINjZMGQwNzBQ
 > 시트에 있는 메시지는 시트가 우선이고, 시트에 없는 것(🔸 표시)만 이 문서가 기준입니다.
 
@@ -400,6 +443,18 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 | MOVE_INFO | C→S / S→C | `{count, location:{x,y}, save:"yes"/"no"}` / 같은 값 + `userid`, `life`🔸 | 받아들인 것만 **양쪽 모두**에게 중계 |
 | GAME_STATUS 🔸 | S→C | `{map, count?, player1, player2}` — player = `{userid, count, life, location}` | 재접속 당사자에게만. 시트 행은 오델로 것이 복사돼 있어 새로 정함. `count`(남은 초)는 GAME_START 전이면 생략 |
 | GAME_RESULT | S→C | `{winner, loser, draw?}` — `{userid, win_count, win_per, score🔸, life🔸}` | `win_count` = 이동한 칸 수, `score` = 게임 점수 |
+
+### 7-5-2. 에어하키
+
+| type | 방향 | payload | 비고 |
+|---|---|---|---|
+| GAME_START | S→C | `{}` | 시트 비고의 "MAP_SEELCT 후 2초"는 점핑 시트 복사 흔적 — 맵 없음, READY 직후 |
+| ONE_START | S→C | `{}` | 한 판(한 골) 시작. 직후 `PUCK_MOVE (0,0)` 한 번 |
+| PUCK_MOVE | S→C | `{loc:{x,y}, vel🔸:{x,y}}` | 받는 유저 기준, 정수. 움직일 때만 30Hz. `vel`(단위/초)로 다음 패킷까지 위치 예측 가능, 멈추면 `vel (0,0)` 이 한 번 옴 |
+| LEVER_MOVE | C→S / S→C | `{loc:{x,y}}` / `{user, loc}` | 내 기준 좌표. 중계는 **상대에게만**, 상대 기준으로 뒤집어서. 봇 레버도 같은 경로 |
+| ONE_RESULT | S→C | `{win, win_count}` | 골 넣은 유저와 그 유저의 누적 골 |
+| GAME_STATUS | S→C | `{puck:{loc, vel🔸}, LEVER0, LEVER1, win_count0🔸, win_count1🔸}` | 재접속 당사자에게만, 그 유저 기준 좌표. LEVER0/1 = player1/2 |
+| GAME_RESULT | S→C | `{winner, loser, draw}` — `{userid, win_count, score, win_per}` | `win_count` = 골 수, `score` = 골×5. **`draw` 는 항상 `"Y"`/`"N"`** — 클라이언트는 이 값으로 결과 화면을 고름. `"Y"` = 둘 다 나갔는데 골 수 같음 또는 정체 무효(winner/loser = player1/player2) |
 
 ### 7-6. 관리자 (Watcher)
 
@@ -488,6 +543,7 @@ erDiagram
     user_partner_info ||--|| rps_user_play_info : userid
     user_partner_info ||--|| othello_user_play_info : userid
     user_partner_info ||--|| stepping_user_play_info : userid
+    user_partner_info ||--|| airhockey_user_play_info : userid
     user_partner_info {
         varchar userid PK
         varchar partner
@@ -517,6 +573,7 @@ erDiagram
 | `rps_game_log_YYYY_MM` | `start_time, end_time, win, lose, vs("2:0"/"2:1"), score(20/10), plays, win_is_bot, lose_is_bot` |
 | `othello_game_log_YYYY_MM` | 위와 같고 `vs`=돌 수(`"45:19"`), `score`=20/0, `plays`=`[{userid,x,y}…]`, `is_draw` 추가 |
 | `stepping_game_log_YYYY_MM` | 오델로와 같고 `map` 추가, `vs`=게임 점수(`"30:15"`), `plays`=`[{userid,count,x,y,save}…]`(받아들인 MOVE_INFO 만) |
+| `airhockey_game_log_YYYY_MM` | 오델로와 같은 컬럼, `vs`=골 수(`"3:1"`), `score`=승자 골×5, `plays`=골 기록 `[{userid,sec}…]`(퍽 좌표는 안 남김) |
 
 - RPS `plays` 는 `[{ "userid1": "가위", "userid2": "보" }, …]` 이고 무승부 판도 포함합니다(2026-10-02 이전 로그는 옛 형식).
 - 오델로 무승부는 `win`/`lose` 에 player1/player2 를 넣고 `is_draw=1` 로 구분합니다.
@@ -538,16 +595,19 @@ erDiagram
 | `check-othello-abandon.mjs` | 퇴장 · 자동 2초 · 재입장 · OUT_USER 시점 | consent/drop 각 41/41 |
 | `check-rps-abandon.mjs` | 퇴장 · 즉시 판정 · 둘 다 퇴장 | consent/drop 각 37/37 |
 | `check-stepping-game.mjs` | 매칭 → 맵 → MOVE_INFO 검증(무시 3종) → 4번째 추락 종료 → 결과 3초 대기 → 재게임 + 퇴장 → 60초 종료 → OUT_USER → DB | 34/34 (수정 전 빌드에서 3초 대기 2건 실패 확인) |
+| `check-airhockey-game.mjs` | 매칭 → 좌표 뒤집기·중앙선 자르기 → 퍽 정체 10초 → 판 다시 시작 → 판의 첫 LEVER_MOVE 가 끌려오지 않고 바로 놓임 → 슛·골(양쪽 궤적 반대) → 골 연출 중 끊김·재접속 `GAME_STATUS` → 3골 → 결과 3초 → 재게임 + 퇴장(봇이 3골) → OUT_USER → 재게임 무응답 10초 → RETURN_TO_LOBBY → DB. 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리는 돈다. `MODE=invalid` = 양쪽 방치 → 재시작 3번 → 4번째 정체에서 즉시 `GAME_RESULT{draw:"Y"}`(GAME_INVALID 없음) → A `N` 즉시 / B 무응답 10초 로비, activeGame·DB 기록 없음(약 65초) | 54/54, invalid 24/24 (봇을 끈 빌드에서 8건, clock 수정 전 빌드에서 무응답 1건, 고정 스텝 수정 전 빌드에서 정체 2건 실패 확인) |
 | `check-admin-login.mjs` / `check-send-notice.mjs` / `check-enter-lobby.mjs` | 관리자 보안 / 공지 필터 / 로비 payload | 통과 |
 
 **쓸 때 지킬 것**
 - `ROOM_ID` 로 방을 고정하세요. `joinOrCreate` 는 같은 이름을 쓰는 **다른 프로세스의 방**을 돌려줄 수 있습니다. 그러면 옛 코드를 "통과"로 오판합니다. roomId 는 기동 로그에서 확인하고, 소문자와 `_` 가 섞여 있으니 잘리지 않게 주의하세요.
 - 퇴장 검증은 `LEAVE_MODE=consent`(→`onLeave`)와 `LEAVE_MODE=drop`(→`onDrop`)을 **둘 다** 돌리세요.
 - 테스트 유저는 전용 접두사(`zz…`)로 만들고 끝에 자기 행만 지웁니다. DB 단정은 접두사가 아니라 **그 게임의 userid** 로 좁히세요.
+- ⚠️ 게임을 추가하면 **모든 check 스크립트의 정리 목록**에 `{game}_user_play_info` 를 넣으세요. 가입 시 모든 게임 행이 생기므로, 빠지면 `user_partner_info` 삭제가 FK 로 실패합니다.
 - 정리는 `Close()` 가 아니라 **`Leave()`** 로 하세요. `Close()` 는 재접속 창을 열어서 방이 몇 분 더 살아 있습니다.
 - 오래 걸리는 스크립트의 출력을 `| head` 로 자르지 마세요. SIGPIPE 로 정리 단계가 안 돕니다. 파일로 받으세요.
 - **"통과"가 그 경로를 밟았다는 뜻은 아닙니다.** 버그 구간에 들어갔는지(예: "나간 지 5초 안에 턴 시작")를 단정에 넣고, 수정을 뺀 빌드에서 **실패하는 것부터** 확인하세요.
 - 재접속 토큰은 프레임이 아니라 **접속 URL 쿼리**(`?reconnectionToken=`)로 보냅니다.
+- ⚠️ **로비 매칭 큐는 실제 클라이언트와 공용**입니다. 사용자가 클라이언트로 테스트 중일 때 돌리면 테스트 유저가 실제 유저와 매칭됩니다(2026-10-15 실제로 겪음). 실행 전에 `~/.pm2/logs/<채널>-out.log` 에서 최근 접속을 확인하세요. `check-airhockey-game.mjs` 는 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리 단계를 `finally` 에서 돌립니다.
 
 ---
 
@@ -614,4 +674,7 @@ erDiagram
 | 매칭 게임 채널 B안(`ip`/`port` 직접 전달) | 사용자가 나중에 바꿀 수 있음. 바꾸면 좌석 예약의 "이 자리는 이 유저" 보장을 다시 설계해야 함 |
 | 점핑 맵별 칸 수 | `STEPPING_MAP_BLOCK_COUNTS` 가 임시값(100). 실제 맵 데이터 받으면 교체 |
 | 점핑 재접속(`GAME_STATUS`) 실서버 검증 | 단위 수준만. `check-stepping-reconnect.mjs` 미작성 |
-| 엑셀 시트 반영 (사용자 작업) | 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |
+| 에어하키 테이블/퍽/레버 크기 | `airhockeyConstants.ts` 의 크기·속도·지연이 임시값. 클라이언트 값 받으면 맞춰야 함 |
+| 에어하키 지연 보상 | 서버 권위 물리라 내 레버 → 퍽 반응에 왕복 지연이 그대로 보임. 클라이언트는 `PUCK_MOVE.vel` 로 예측해 그려야 함 |
+| 에어하키 클라이언트 (사용자 작업) | ① `PUCK_MOVE` 를 `loc + vel×경과초` 로 예측해 그리기(안 하면 30Hz 로 뚝뚝 끊김) ② `GAME_RESULT.draw` 로 결과 화면 분기(`"Y"` = 무승부·무효) ③ `LEVER_MOVE` 를 손가락 위치로 계속 보내기(판의 첫 입력이 시작 위치) ④ 테이블·퍽·레버 크기를 서버 값과 일치 — 신고 화면에서 퍽이 테두리 밖에 그려져 크기/비율 차이가 의심됨 |
+| 엑셀 시트 반영 (사용자 작업) | 에어하키: `GAME_RESULT.draw` 항상 Y/N(정체 무효 = draw:Y), 판 시작 레버 규칙, 퍽 정체 10초 재시작, `PUCK_MOVE.vel`, `GAME_START` 비고(맵 없음), `GAME_STATUS.win_count0/1`, `GAME_RESULT.score`=골×5·`draw` 조건, 좌표계·테이블 크기. 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |

@@ -265,7 +265,7 @@ async function Main() {
     } else {
         console.log(`\n정리 (이번 테스트 유저 행만):`);
         await pool.query(`DELETE FROM \`${table}\` WHERE win IN (?, ?) OR lose IN (?, ?)`, [userid_a, userid_b, userid_a, userid_b]);
-        for (const t of ["stepping_rank_daily", "stepping_rank_weekly", "stepping_user_play_info", "othello_user_play_info", "rps_user_play_info", "user_member_info", "user_partner_info"]) {
+        for (const t of ["stepping_rank_daily", "stepping_rank_weekly", "stepping_user_play_info", "othello_user_play_info", "rps_user_play_info", "airhockey_user_play_info", "user_member_info", "user_partner_info"]) {
             const [r] = await pool.query(`DELETE FROM ${t} WHERE userid IN (?, ?)`, [userid_a, userid_b]);
             if (r.affectedRows > 0) console.log(`  ${t}: ${r.affectedRows}행 삭제`);
         }

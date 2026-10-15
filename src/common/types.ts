@@ -90,6 +90,12 @@ export const MessageType = {
     GAME_REMAIN_TIME: "GAME_REMAIN_TIME",             // S→C { count } — GAME_START 이후 게임 남은 초 (59 … 0)
     MOVE_INFO: "MOVE_INFO",                           // C→S { count, location:{x,y}, save:"yes"|"no" } / S→C 같은 type 에 userid, life 추가
 
+    // 에어하키(airhockey) 전용 (2026-10-15, payload 는 game/airhockey/airhockeyTypes.ts). 엑셀본 `airhockey` 시트 기준.
+    // ONE_START / ONE_RESULT 는 RPS 와 같은 이름을 쓴다(한 골 = 한 판). 좌표는 **받는 유저 기준**(내가 아래쪽).
+    // ⚠️ 둘 다 초당 수십 번 오가므로 C↔S 로그를 남기지 않는다(log.ts HIGH_FREQUENCY_MESSAGE_TYPES).
+    PUCK_MOVE: "PUCK_MOVE",                           // S→C { loc:{x,y} } — 서버가 계산한 퍽 위치
+    LEVER_MOVE: "LEVER_MOVE",                         // C→S { loc:{x,y} } / S→C { user, loc } — 상대 레버 위치 중계
+
     // 공통
     ERROR: "ERROR",                       // S→C
 

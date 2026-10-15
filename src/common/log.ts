@@ -41,6 +41,13 @@ const SECRET_MESSAGE_TYPES = new Set<string>([types.MessageType.ADMIN_LOGIN]);
 // 값을 통째로 가려야 하는 필드 이름. phone 처럼 뒷자리를 남기면 안 되는 값들이다
 // (비밀번호는 일부만 노출돼도 대입 공격의 단서가 된다).
 const SECRET_KEYS = new Set<string>(["password", "passwd", "pw", "token", "secret"]);
+
+// 초당 수십 번 오가는 실시간 메시지 — C↔S 로그를 아예 남기지 않는다(2026-10-15 에어하키 추가).
+// 에어하키 한 방이 PUCK_MOVE 만 초당 60건(30Hz × 2명)을 보내므로, 남기면 로그가 다른 메시지를 묻어 버린다.
+export const HIGH_FREQUENCY_MESSAGE_TYPES = new Set<string>([
+    types.MessageType.PUCK_MOVE,
+    types.MessageType.LEVER_MOVE,
+]);
 const SECRET_MASK = "***";
 
 // payload 를 로그용 문자열로 변환한다. 통계성 메시지(위 STATS_MESSAGE_TYPES)와 자격증명 메시지
@@ -78,6 +85,7 @@ export function LogDisconnect(room: Room, client: Client, code?: number): void {
 
 // 클라이언트 → 서버로 받은 메시지 (C→S)
 export function LogClientMessage(room: Room, client: Client, type: string, payload: unknown): void {
+    if (HIGH_FREQUENCY_MESSAGE_TYPES.has(type)) return;
     console.log(
         `${GREEN}[C→S]${RESET} ${RoomTag(room)} sessionId=${client.sessionId} type=${type} payload=${StringifyPayload(type, payload)}`
     );
@@ -85,6 +93,7 @@ export function LogClientMessage(room: Room, client: Client, type: string, paylo
 
 // 서버 → 클라이언트로 보낸 메시지 (S→C)
 export function LogServerMessage(room: Room, client: Client, type: string, payload: unknown): void {
+    if (HIGH_FREQUENCY_MESSAGE_TYPES.has(type)) return;
     console.log(
         `${MAGENTA}[S→C]${RESET} ${RoomTag(room)} sessionId=${client.sessionId} type=${type} payload=${StringifyPayload(type, payload)}`
     );

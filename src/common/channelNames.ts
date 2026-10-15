@@ -8,7 +8,7 @@ import * as constants from "./constants.js";
 // 실제 게임 종류 목록 — 게임을 추가하면 여기에 하나 더한다(2026-10-02 "게임별 분리 구조" 참고).
 // 채널(프로세스/포트)과 DB 통계 테이블이 게임별로 완전히 분리돼 있으므로, 새 게임을 추가할 때
 // GetChannelPort 의 분기 하나 + .env 의 포트 목록 + common/constants.ts 의 채널수 상수를 같이 늘린다.
-export type GameType = "rps" | "othello" | "stepping";
+export type GameType = "rps" | "othello" | "stepping" | "airhockey";
 
 export type ChannelType = "watcher" | "lobby" | GameType;
 
@@ -16,7 +16,7 @@ export type ChannelType = "watcher" | "lobby" | GameType;
 // (클라이언트가 보낸 game 값은 TypeScript 타입으로 막히지 않으므로, 이 목록으로 직접 검사해야 한다).
 // 2026-10-07: LobbyManager 안에만 있던 걸 여기로 옮겼다 — WatcherManager 도 관리자 메시지의 game 필드를
 // 검사해야 해서, 게임을 추가할 때 고칠 자리가 두 군데로 흩어지지 않게 한 곳에 모았다.
-export const ALL_GAME_TYPES: GameType[] = ["rps", "othello", "stepping"];
+export const ALL_GAME_TYPES: GameType[] = ["rps", "othello", "stepping", "airhockey"];
 
 export function IsGameType(value: unknown): value is GameType {
     return typeof value === "string" && (ALL_GAME_TYPES as string[]).includes(value);
@@ -35,6 +35,7 @@ export function GetGameChannelCount(game: GameType): number {
     if (game === "rps") return constants.RPS_CHANNEL_COUNT;
     if (game === "othello") return constants.OTHELLO_CHANNEL_COUNT;
     if (game === "stepping") return constants.STEPPING_CHANNEL_COUNT;
+    if (game === "airhockey") return constants.AIRHOCKEY_CHANNEL_COUNT;
     throw new Error(`알 수 없는 게임 종류입니다: ${game}`);
 }
 
@@ -89,6 +90,10 @@ export function GetChannelPort(channel_type: ChannelType, channel_no: number): n
 
     if (channel_type === "stepping") {
         return GetPortFromList(channel_type, channel_no, config.stepping_ports, constants.STEPPING_CHANNEL_COUNT);
+    }
+
+    if (channel_type === "airhockey") {
+        return GetPortFromList(channel_type, channel_no, config.airhockey_ports, constants.AIRHOCKEY_CHANNEL_COUNT);
     }
 
     throw new Error(`알 수 없는 채널 종류입니다: ${channel_type}`);

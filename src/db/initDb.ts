@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 import { config } from "../common/config.js";
+import * as airhockeyGameLogSchema from "./airhockeyGameLogSchema.js";
 import * as othelloGameLogSchema from "./othelloGameLogSchema.js";
 import * as steppingGameLogSchema from "./steppingGameLogSchema.js";
 import * as userRegistration from "./queries/userRegistration.js";
@@ -83,6 +84,9 @@ async function EnsureCurrentMonthGameLogs(): Promise<void> {
 
     const stepping_table = await steppingGameLogSchema.EnsureSteppingGameLogTable(pool, now);
     console.log(`[db:init] 이번 달 점핑 게임 로그 테이블 확인/생성 완료: ${stepping_table}`);
+
+    const airhockey_table = await airhockeyGameLogSchema.EnsureAirhockeyGameLogTable(pool, now);
+    console.log(`[db:init] 이번 달 에어하키 게임 로그 테이블 확인/생성 완료: ${airhockey_table}`);
 }
 
 // 게임이 추가되기 전에 가입한 유저에게 그 게임의 통계 행을 채워 넣는다.
