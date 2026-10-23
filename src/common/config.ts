@@ -54,6 +54,7 @@ export const config = {
     othello_ports: ReadNumberList("OTHELLO_PORTS", [6031, 6032, 6033]), // 2026-10-07 오델로 추가
     stepping_ports: ReadNumberList("STEPPING_PORTS", [6041, 6042, 6043]), // 2026-10-14 점핑 추가
     airhockey_ports: ReadNumberList("AIRHOCKEY_PORTS", [6051, 6052, 6053]), // 2026-10-15 에어하키 추가
+    flag_ports: ReadNumberList("FLAG_PORTS", [6061, 6062, 6063]), // 2026-10-22 청기백기 추가
 
     // 좌석 예약(seat_reservation)의 publicAddress 에 쓰는 이 서버의 공개 주소.
     // 개발 환경 기본값은 localhost. 운영 환경은 실제 도메인/IP 로 .env 에 설정해야 한다.

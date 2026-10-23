@@ -103,6 +103,9 @@ export interface AirhockeyLeverState {
     y: number;
     target_x: number;
     target_y: number;
+    hand_x: number; // 입력을 따라가는 "손" 위치. 레버(x, y)는 이 손을 무게만큼 늦게 따라간다 (AIRHOCKEY_LEVER_WEIGHT_SEC)
+    hand_y: number;
+    has_weight: boolean; // 사람 입력(LEVER_MOVE)이면 true. 봇은 false — 봇 판단이 레버 위치에 맞춰져 있고 BOT_SPEED 로 이미 느리다
     vx: number;
     vy: number;
     follow_speed: number;

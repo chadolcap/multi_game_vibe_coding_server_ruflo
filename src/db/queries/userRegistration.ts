@@ -16,6 +16,7 @@ const GAME_PLAY_INFO_TABLES = [
     "othello_user_play_info",
     "stepping_user_play_info",
     "airhockey_user_play_info",
+    "flag_user_play_info",
 ] as const;
 
 // user_partner_info / user_member_info / 각 게임의 *_user_play_info 에 기본 정보를 넣는다.

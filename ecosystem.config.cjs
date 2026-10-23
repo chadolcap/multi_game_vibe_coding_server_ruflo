@@ -61,5 +61,9 @@ module.exports = {
         Channel("airhockey_1", "airhockey", 1),
         Channel("airhockey_2", "airhockey", 2),
         Channel("airhockey_3", "airhockey", 3),
+        // 청기백기 (2026-10-22 추가, 1인 게임, 포트 6061~6063)
+        Channel("flag_1", "flag", 1),
+        Channel("flag_2", "flag", 2),
+        Channel("flag_3", "flag", 3),
     ],
 };

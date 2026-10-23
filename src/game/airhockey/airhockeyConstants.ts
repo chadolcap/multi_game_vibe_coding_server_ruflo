@@ -47,6 +47,14 @@ export const AIRHOCKEY_LEVER_INPUT_INTERVAL_SEC = 1 / 30; // 첫 입력 전 기�
 export const AIRHOCKEY_LEVER_INPUT_INTERVAL_MIN_SEC = 1 / 120; // 패킷이 몰려 와도 이보다 짧게 보지 않는다
 export const AIRHOCKEY_LEVER_INPUT_INTERVAL_MAX_SEC = 0.1; // 손을 멈췄다 다시 움직일 때 너무 느려지지 않게
 export const AIRHOCKEY_LEVER_INPUT_INTERVAL_SMOOTHING = 0.3; // 간격 이동평균(EMA)에서 새 값의 비중
+// 레버 무게 (2026-10-22 사용자 요청 "레버가 너무 가벼워 퍽이 쉽게 튄다"). 위 규칙으로 입력을 따라가는 점은 "손"이고,
+// 레버는 그 손을 1차 지연으로 늦게 따라간다: 매 틱 레버 += (손 - 레버) × (1 - e^(-dt/τ)).
+// 짧게 툭 친 손은 레버가 다 가속하기 전에 끝나서 약하게 맞고, 길게 휘두르면 손 속도까지 올라가 세게 맞는다.
+// 손을 멈추면 레버가 스르륵 멈춘다(지나쳤다 돌아오지 않는다). 값이 클수록 무겁고, 0 이면 예전처럼 손에 바로 붙는다.
+// ⚠️ 클라이언트가 자기 레버를 그릴 때도 같은 τ·공식을 써야 화면 레버와 판정 레버가 맞는다(손 = 손가락 위치).
+//    상대 레버(LEVER_MOVE 중계)는 이미 무게가 적용된 서버 좌표라 클라이언트가 다시 늦추면 안 된다.
+export const AIRHOCKEY_LEVER_WEIGHT_SEC = 0.05;
+export const AIRHOCKEY_LEVER_SETTLE_DISTANCE = 0.5; // 손과 이보다 가까우면 손 자리에 딱 맞춰 멈춘다 (무한히 다가가며 떨지 않게)
 
 // ── 봇(자동 조종) ──
 // 게임 중 끊기거나 나간 유저의 레버는 서버의 간단한 봇이 대신 움직인다(사용자 결정).

@@ -13,6 +13,7 @@ export const RPS_CHANNEL_COUNT = 1;
 export const OTHELLO_CHANNEL_COUNT = 1; // 실 서비스 목표 3 (.env OTHELLO_PORTS=6031,6032,6033), 로컬 테스트는 6031 만
 export const STEPPING_CHANNEL_COUNT = 1; // 2026-10-14 점핑 추가. 실 서비스 목표 3 (.env STEPPING_PORTS=6041,6042,6043), 로컬 테스트는 6041 만
 export const AIRHOCKEY_CHANNEL_COUNT = 1; // 2026-10-15 에어하키 추가. 실 서비스 목표 3 (.env AIRHOCKEY_PORTS=6051,6052,6053), 로컬 테스트는 6051 만
+export const FLAG_CHANNEL_COUNT = 1; // 2026-10-22 청기백기(1인) 추가. 실 서비스 목표 3 (.env FLAG_PORTS=6061,6062,6063), 로컬 테스트는 6061 만
 export const MAX_CLIENTS_PER_CHANNEL = 300;     // 로비/게임 채널별 최대 동시 접속
 export const MAX_ROOMS_PER_GAME_CHANNEL = 100;  // 게임 채널별 방 개수
 export const MAX_PLAYERS_PER_GAME_CHANNEL = 200; // 게임 채널별 게임 인원

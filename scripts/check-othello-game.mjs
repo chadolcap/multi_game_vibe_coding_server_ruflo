@@ -346,7 +346,7 @@ async function Main() {
     } else {
         console.log(`\n정리 (partner='${TEST_PARTNER}' 인 행만):`);
         await pool.query(`DELETE FROM \`${table}\` WHERE win LIKE ? OR lose LIKE ?`, [`${TEST_PARTNER}_%`, `${TEST_PARTNER}_%`]);
-        for (const t of ["othello_rank_daily", "othello_rank_weekly", "rps_rank_daily", "rps_rank_weekly", "othello_user_play_info", "rps_user_play_info", "stepping_user_play_info", "airhockey_user_play_info", "user_member_info", "user_partner_info"]) {
+        for (const t of ["othello_rank_daily", "othello_rank_weekly", "rps_rank_daily", "rps_rank_weekly", "othello_user_play_info", "rps_user_play_info", "stepping_user_play_info", "airhockey_user_play_info", "flag_user_play_info", "user_member_info", "user_partner_info"]) {
             const [r] = await pool.query(`DELETE FROM ${t} WHERE userid LIKE ?`, [`${TEST_PARTNER}_%`]);
             if (r.affectedRows > 0) console.log(`  ${t}: ${r.affectedRows}행 삭제`);
         }

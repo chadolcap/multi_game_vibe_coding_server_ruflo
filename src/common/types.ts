@@ -96,6 +96,10 @@ export const MessageType = {
     PUCK_MOVE: "PUCK_MOVE",                           // S→C { loc:{x,y} } — 서버가 계산한 퍽 위치
     LEVER_MOVE: "LEVER_MOVE",                         // C→S { loc:{x,y} } / S→C { user, loc } — 상대 레버 위치 중계
 
+    // 청기백기(flag, 1인) 전용 (2026-10-22, payload 는 game/flag/flagTypes.ts). 엑셀본 `flag` 시트 기준.
+    // ONE_START / ONE_RESULT 는 RPS 와 같은 이름을 쓴다(한 문제 = 한 판).
+    QUEST_SHOW: "QUEST_SHOW",                         // S→C { quest:{b,w} } 문제 제시 / C→S { quest:{b,w} } 답 — 같은 type 재사용
+
     // 공통
     ERROR: "ERROR",                       // S→C
 
@@ -298,7 +302,7 @@ export interface MatchFoundPayload {
     room_name: string;
     room_id: string;
     seat_reservation: SeatReservation;
-    opponent: OpponentInfo;
+    opponent?: OpponentInfo; // 혼자 하는 게임(청기백기 등, channelNames.SOLO_GAME_TYPES)은 상대가 없어 생략한다 (2026-10-22)
 }
 
 // REJOIN_GAME 으로 클라이언트에 보내는 값. MATCH_FOUND 의 seat_reservation(consumeSeatReservation() 으로
@@ -340,7 +344,7 @@ export interface EnterRoomPayload {
     result: "Y";
     room: string; // 입장한 방번호. 지금은 Colyseus roomId 문자열을 그대로 쓴다 (순번 표시가 필요하면 별도 확인 필요)
     player1: RoomPlayerInfo;
-    player2: RoomPlayerInfo;
+    player2?: RoomPlayerInfo; // 혼자 하는 게임(청기백기)은 생략한다 (2026-10-22). 2인 게임은 항상 있다
 }
 
 // OUT_USER — 게임 전/후 상대가 나가면 남은 유저에게 S→C 로 알린다

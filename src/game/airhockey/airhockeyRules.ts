@@ -77,6 +77,9 @@ export function CreateLever(side: AirhockeySide): AirhockeyLeverState {
         y: home.y,
         target_x: home.x,
         target_y: home.y,
+        hand_x: home.x,
+        hand_y: home.y,
+        has_weight: true,
         vx: 0,
         vy: 0,
         follow_speed: airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED,
@@ -90,10 +93,12 @@ export function CreateLever(side: AirhockeySide): AirhockeyLeverState {
 // now_ms 를 주면(클라이언트 LEVER_MOVE) 입력 간격을 재서, 레버가 **다음 입력이 올 때쯤 목표에 도착하는
 // 일정한 속도**로 움직이게 한다 — 서버 레버 속도 = 실제 손 속도. 손 600/초, 30Hz 입력이면 매 틱 600/초다.
 // now_ms 가 없으면(봇, 테스트) 최대 속도로 바로 따라간다 — 봇은 매 틱 한 틱 거리만큼만 목표를 준다.
+// 레버 무게(AIRHOCKEY_LEVER_WEIGHT_SEC)도 사람 입력(now_ms 있음)에만 건다.
 export function SetLeverTarget(lever: AirhockeyLeverState, point: AirhockeyPoint, now_ms?: number): void {
     const clamped = ClampLeverPosition(lever.side, point);
     lever.target_x = clamped.x;
     lever.target_y = clamped.y;
+    lever.has_weight = now_ms !== undefined;
 
     if (now_ms === undefined) {
         lever.follow_speed = airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED;
@@ -112,8 +117,9 @@ export function SetLeverTarget(lever: AirhockeyLeverState, point: AirhockeyPoint
     }
     lever.last_input_at_ms = now_ms;
 
-    // 지금 위치에서 새 목표까지의 거리를 입력 간격 동안 가는 속도. 밀려 있던 거리도 같이 따라잡는다.
-    const distance = Math.hypot(lever.target_x - lever.x, lever.target_y - lever.y);
+    // 지금 손 위치에서 새 목표까지의 거리를 입력 간격 동안 가는 속도. 밀려 있던 거리도 같이 따라잡는다.
+    // (레버 자체는 이 손을 무게만큼 늦게 따라간다 — ComputeLeverMove)
+    const distance = Math.hypot(lever.target_x - lever.hand_x, lever.target_y - lever.hand_y);
     lever.follow_speed = Math.min(distance / lever.input_interval_sec, airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED);
 }
 
@@ -122,6 +128,8 @@ export function SetLeverTarget(lever: AirhockeyLeverState, point: AirhockeyPoint
 export function ResetLeverMotion(lever: AirhockeyLeverState): void {
     lever.target_x = lever.x;
     lever.target_y = lever.y;
+    lever.hand_x = lever.x;
+    lever.hand_y = lever.y;
     lever.vx = 0;
     lever.vy = 0;
     lever.follow_speed = airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED;
@@ -136,6 +144,7 @@ export function SnapLever(lever: AirhockeyLeverState, point: AirhockeyPoint, now
     lever.x = clamped.x;
     lever.y = clamped.y;
     ResetLeverMotion(lever);
+    lever.has_weight = true;
     lever.last_input_at_ms = now_ms;
 }
 
@@ -182,10 +191,29 @@ export function StepWorld(
     return { goal: null };
 }
 
-// 이번 틱에 레버가 갈 거리 — target 쪽으로 follow_speed(최대 속도 이하)만큼.
+// 이번 틱에 레버가 갈 거리. 손(hand)이 target 쪽으로 follow_speed(최대 속도 이하)만큼 가고,
+// 레버는 그 손을 무게(AIRHOCKEY_LEVER_WEIGHT_SEC)만큼 늦게 따라간다. 손은 여기서 옮기고, 레버 이동량만 돌려준다.
 function ComputeLeverMove(lever: AirhockeyLeverState, dt_sec: number): AirhockeyPoint {
-    const speed = Math.min(lever.follow_speed, airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED);
-    return ClampLength(lever.target_x - lever.x, lever.target_y - lever.y, speed * dt_sec);
+    const max_speed = airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED;
+    const speed = Math.min(lever.follow_speed, max_speed);
+    const hand_move = ClampLength(lever.target_x - lever.hand_x, lever.target_y - lever.hand_y, speed * dt_sec);
+    lever.hand_x += hand_move.x;
+    lever.hand_y += hand_move.y;
+
+    const gap_x = lever.hand_x - lever.x;
+    const gap_y = lever.hand_y - lever.y;
+    if (Math.hypot(gap_x, gap_y) <= airhockeyConstants.AIRHOCKEY_LEVER_SETTLE_DISTANCE) {
+        return { x: gap_x, y: gap_y };
+    }
+    const follow = lever.has_weight ? GetLeverFollowRatio(dt_sec) : 1;
+    return ClampLength(gap_x * follow, gap_y * follow, max_speed * dt_sec);
+}
+
+// 한 틱(dt_sec) 동안 레버가 손과의 거리 중 따라잡는 비율 = 1 - e^(-dt/τ). 무게 0 이면 1(손에 바로 붙음).
+// 클라이언트가 자기 레버를 그릴 때도 이 공식을 그대로 쓴다.
+export function GetLeverFollowRatio(dt_sec: number): number {
+    const weight_sec = airhockeyConstants.AIRHOCKEY_LEVER_WEIGHT_SEC;
+    return weight_sec > 0 ? 1 - Math.exp(-dt_sec / weight_sec) : 1;
 }
 
 // 퍽 없이 레버만 목표 쪽으로 움직인다 — 판 사이(골 연출 중)에 쓴다. 속도 제한은 StepWorld 와 같다.

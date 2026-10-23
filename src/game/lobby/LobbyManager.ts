@@ -392,6 +392,11 @@ export class LobbyManager {
     // 대기열에 있는 만큼 계속 매칭을 시도한다. "기다리는 방"이 있으면 1명씩 채워 넣고,
     // 없으면 2명이 모일 때 새 방을 만든다 (CLAUDE.md 게임 규칙 12번 / TASKS Phase 4-3).
     private async TryMatch(game: GameType): Promise<void> {
+        if (channelNames.IsSoloGame(game)) {
+            await this.TryMatchSolo(game);
+            return;
+        }
+
         const match_queue = this.match_queue_by_game.get(game)!;
         const matcher = this.matchers_by_game.get(game)!;
 
@@ -451,6 +456,33 @@ export class LobbyManager {
                 room_id: new_match.room_id,
                 seat_reservation: new_match.reservation_b,
                 opponent: gameRoomMatcher.ToPublicOpponentInfo(first_entry.user),
+            });
+        }
+    }
+
+    // 혼자 하는 게임(청기백기 등) — 상대를 기다리지 않고 대기열의 유저마다 바로 1인 방을 만든다 (2026-10-22).
+    // "기다리는 방"도 없다(재게임 상대가 없으므로). opponent 는 MATCH_FOUND 에서 생략한다.
+    private async TryMatchSolo(game: GameType): Promise<void> {
+        const match_queue = this.match_queue_by_game.get(game)!;
+        const matcher = this.matchers_by_game.get(game)!;
+
+        while (match_queue.length > 0) {
+            const userid = match_queue.shift()!;
+            const entry = this.waiting_by_userid.get(userid);
+            if (!entry) continue; // 대기열에 있는 사이 연결이 끊긴 유저
+
+            const solo_match = await matcher.CreateRoomForOne(entry.user);
+            if (!solo_match) {
+                // 그 게임 채널이 모두 꽉 참 — 로비에 남는다(연결 유지). 2인 게임과 같은 응답이다.
+                messages.SendError(this.room, entry.client, types.ErrorCode.NO_GAME_ROOM, "접속 가능한 게임방이 없습니다. 잠시 후 다시 참여 해 주세요.");
+                continue;
+            }
+
+            this.SendMatchFoundAndLeave(entry.client, userid, {
+                game,
+                room_name: solo_match.room_name,
+                room_id: solo_match.room_id,
+                seat_reservation: solo_match.reservation,
             });
         }
     }

@@ -393,7 +393,7 @@ async function Cleanup() {
     const table = log_mod.GetAirhockeyGameLogTableName(new Date());
     console.log(`\n정리 (이번 테스트 유저 행만):`);
     await pool.query(`DELETE FROM \`${table}\` WHERE win IN (?, ?) OR lose IN (?, ?)`, [userid_a, userid_b, userid_a, userid_b]).catch(() => {});
-    for (const t of ["airhockey_rank_daily", "airhockey_rank_weekly", "airhockey_user_play_info", "stepping_user_play_info", "othello_user_play_info", "rps_user_play_info", "user_member_info", "user_partner_info"]) {
+    for (const t of ["airhockey_rank_daily", "airhockey_rank_weekly", "airhockey_user_play_info", "flag_user_play_info", "stepping_user_play_info", "othello_user_play_info", "rps_user_play_info", "user_member_info", "user_partner_info"]) {
         const [r] = await pool.query(`DELETE FROM ${t} WHERE userid IN (?, ?)`, [userid_a, userid_b]);
         if (r.affectedRows > 0) console.log(`  ${t}: ${r.affectedRows}행 삭제`);
     }

@@ -18,18 +18,19 @@ function Puck(x: number, y: number, vx = 0, vy = 0): AirhockeyPuckState {
     return { x, y, vx, vy };
 }
 
-// 레버 하나를 (x, y)에 멈춰 세운다 (목표도 같은 자리)
+// 레버 하나를 (x, y)에 멈춰 세운다 (목표·손도 같은 자리)
 function LeverAt(side: 0 | 1, x: number, y: number): AirhockeyLeverState {
     const lever = airhockeyRules.CreateLever(side);
-    Object.assign(lever, { x, y, target_x: x, target_y: y });
+    Object.assign(lever, { x, y, target_x: x, target_y: y, hand_x: x, hand_y: y });
     return lever;
 }
 
 // 손이 hand_speed(단위/초)로 위로 움직이고, 클라이언트가 실제처럼 2틱(33ms)마다 LEVER_MOVE 를 보낸다.
 // 퍽에 처음 닿은 순간의 퍽 속도와, 그 전까지 서버 레버의 틱별 vy 를 돌려준다.
+// 퍽은 레버가 무게를 이기고 손 속도까지 다 올라간 뒤에 닿도록 멀리(400) 둔다.
 function SwingAt(hand_speed: number): { puck_speed: number; lever_vy: number[] } {
     const lever = LeverAt(0, 0, -500);
-    const puck = Puck(0, -300);
+    const puck = Puck(0, -100);
     let hand_y = -500;
     let now_ms = 1000;
     const lever_vy: number[] = [];
@@ -208,8 +209,9 @@ describe("StepWorld — 레버", () => {
 describe("레버 타격 손맛 — 30Hz 입력 (2026-10-15 수정)", () => {
     it("2틱마다 오는 입력에도 서버 레버 속도가 손 속도로 일정하다 (예전: [0, 2V, 0, 2V …])", () => {
         const { lever_vy } = SwingAt(600);
-        // 처음 몇 틱은 입력 간격을 추정하는 중이라 빼고 본다
-        for (const vy of lever_vy.slice(6)) {
+        // 처음 틱들은 입력 간격을 추정하고 레버가 무게를 이기며 가속하는 중이라 빼고 본다
+        assert.ok(lever_vy.length > 25, `퍽에 너무 일찍 닿았다 (${lever_vy.length}틱)`);
+        for (const vy of lever_vy.slice(20)) {
             assert.ok(Math.abs(vy - 600) < 60, `레버 속도가 튄다: ${lever_vy.map(Math.round).join(",")}`);
         }
     });
@@ -245,13 +247,62 @@ describe("레버 타격 손맛 — 30Hz 입력 (2026-10-15 수정)", () => {
     });
 });
 
-describe("MoveLeversOnly — 판 사이", () => {
-    it("레버만 목표 쪽으로 최대 속도까지 움직인다", () => {
+describe("레버 무게 (2026-10-22 — 퍽이 너무 쉽게 튄다)", () => {
+    // 손이 한 번에 jump 만큼 위로 갔다가 멈춘다(LEVER_MOVE 한 번). 그동안 레버가 낸 가장 빠른 속도를 돌려준다.
+    function JabPeakSpeed(jump: number): number {
         const lever = LeverAt(0, 0, -500);
-        airhockeyRules.SetLeverTarget(lever, { x: 0, y: -LEVER_R });
+        airhockeyRules.SetLeverTarget(lever, { x: 0, y: -500 + jump }, 1000);
+        let peak = 0;
+        for (let tick = 0; tick < 30; tick++) {
+            airhockeyRules.MoveLeversOnly([lever], DT);
+            peak = Math.max(peak, Math.hypot(lever.vx, lever.vy));
+        }
+        return peak;
+    }
+
+    it("짧게 툭 친 손은 레버가 다 가속하기 전에 끝나서 손 속도의 절반 정도만 낸다", () => {
+        // 30Hz 한 패킷에 40 이동 = 손 1200/초
+        const hand_speed = 40 / airhockeyConstants.AIRHOCKEY_LEVER_INPUT_INTERVAL_SEC;
+        const peak = JabPeakSpeed(40);
+        assert.ok(peak < hand_speed * 0.6, `툭 친 레버 최고 속도 ${Math.round(peak)} / 손 ${Math.round(hand_speed)}`);
+    });
+
+    it("손을 멈추면 레버는 손을 지나치지 않고 손 자리에서 멈춘다", () => {
+        const lever = LeverAt(0, 0, -500);
+        airhockeyRules.SetLeverTarget(lever, { x: 0, y: -400 }, 1000);
+        let max_y = -Infinity;
+        for (let tick = 0; tick < 60; tick++) {
+            airhockeyRules.MoveLeversOnly([lever], DT);
+            max_y = Math.max(max_y, lever.y);
+        }
+        assert.ok(max_y <= -400 + 1e-9, `지나쳤다 max_y=${max_y}`);
+        assert.deepEqual([lever.y, lever.vy], [-400, 0]);
+    });
+
+    it("레버는 손을 무게만큼 늦게 따라간다 — 한 틱에 손과의 거리 중 1 - e^(-dt/τ) 만큼", () => {
+        const lever = LeverAt(0, 0, -500);
+        Object.assign(lever, { hand_y: -400, target_y: -400 });
+        airhockeyRules.MoveLeversOnly([lever], DT);
+        const expected = -500 + 100 * airhockeyRules.GetLeverFollowRatio(DT);
+        assert.ok(Math.abs(lever.y - expected) < 1e-9, `lever.y=${lever.y} 기대 ${expected}`);
+    });
+});
+
+describe("MoveLeversOnly — 판 사이", () => {
+    it("손은 목표 쪽으로 최대 속도까지, 레버는 그 손을 무게만큼 늦게 따라간다", () => {
+        const lever = LeverAt(0, 0, -500);
+        airhockeyRules.SetLeverTarget(lever, { x: 0, y: -LEVER_R }, 1000);
         airhockeyRules.MoveLeversOnly([lever], DT);
         const max_move = airhockeyConstants.AIRHOCKEY_LEVER_MAX_SPEED * DT;
-        assert.ok(Math.abs(lever.y - (-500 + max_move)) < 1e-9);
+        assert.ok(Math.abs(lever.hand_y - (-500 + max_move)) < 1e-9);
+        assert.ok(lever.y > -500 && lever.y < lever.hand_y, `lever.y=${lever.y} hand_y=${lever.hand_y}`);
+    });
+
+    it("봇(now_ms 없음)은 무게 없이 손에 바로 붙는다 — 봇 판단이 레버 위치 기준으로 맞춰져 있다", () => {
+        const lever = LeverAt(0, 0, -500);
+        airhockeyRules.SetLeverTarget(lever, { x: 0, y: -490 });
+        airhockeyRules.MoveLeversOnly([lever], DT);
+        assert.equal(lever.y, -490);
     });
 });
 

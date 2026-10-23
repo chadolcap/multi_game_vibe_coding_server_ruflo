@@ -64,6 +64,14 @@ describe("ALL_GAME_TYPES / IsGameType", () => {
         assert.equal(channelNames.IsGameType("airhockey"), true);
     });
 
+    it("지원하는 게임 목록에 flag 가 있고, 혼자 하는 게임은 flag 뿐이다 (2026-10-22 청기백기 추가)", () => {
+        assert.equal(channelNames.IsGameType("flag"), true);
+        assert.equal(channelNames.IsSoloGame("flag"), true);
+        for (const game of ["rps", "othello", "stepping", "airhockey"] as const) {
+            assert.equal(channelNames.IsSoloGame(game), false, `${game} 가 1인 게임으로 잡혔다`);
+        }
+    });
+
     it("목록에 있는 값만 통과시킨다 (관리자/로비 메시지의 game 런타임 검사용)", () => {
         for (const game of channelNames.ALL_GAME_TYPES) {
             assert.equal(channelNames.IsGameType(game), true, `${game} 가 거부됐다`);
@@ -89,6 +97,7 @@ describe("ParseGameTypeFromRoomName", () => {
         assert.equal(channelNames.ParseGameTypeFromRoomName("othello_3"), "othello");
         assert.equal(channelNames.ParseGameTypeFromRoomName("stepping_1"), "stepping");
         assert.equal(channelNames.ParseGameTypeFromRoomName("airhockey_1"), "airhockey");
+        assert.equal(channelNames.ParseGameTypeFromRoomName("flag_1"), "flag");
     });
 
     it("게임 룸이 아니면 undefined 다", () => {

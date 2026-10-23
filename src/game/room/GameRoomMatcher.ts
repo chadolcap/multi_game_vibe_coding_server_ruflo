@@ -20,6 +20,13 @@ export interface NewRoomMatch {
     reservation_b: SeatReservation;
 }
 
+// 혼자 하는 게임(청기백기 등)의 새 방 — 좌석 예약이 하나뿐이다 (2026-10-22)
+export interface SoloRoomMatch {
+    room_name: string;
+    room_id: string;
+    reservation: SeatReservation;
+}
+
 export interface WaitingRoomMatch {
     room_name: string;
     room_id: string;
@@ -136,6 +143,24 @@ export class GameRoomMatcher {
     // defined" 로 실패하는 문제가 실제로 있었다 — Colyseus 자체에는 "어떤 프로세스가 어떤 룸 이름을
     // 처리하는지" 클러스터 전체에서 조회할 방법이 없어서, 하트비트를 직접 만들어 확인한다.
     public async CreateRoomForTwo(user_a: UserInfo, user_b: UserInfo): Promise<NewRoomMatch | null> {
+        const created = await this.CreateRoomWithSeats([user_a, user_b]);
+        if (!created) return null;
+        const [reservation_a, reservation_b] = created.reservations;
+        return { room_name: created.room_name, room_id: created.room_id, reservation_a, reservation_b };
+    }
+
+    // 혼자 하는 게임(channelNames.SOLO_GAME_TYPES)의 새 방을 만든다 — 상대를 기다리지 않는다 (2026-10-22 청기백기).
+    // 채널 고르는 규칙(번호가 빠른 채널부터, 닫는 중 제외, 꽉 차면 다음)은 2인 방과 같다.
+    public async CreateRoomForOne(user: UserInfo): Promise<SoloRoomMatch | null> {
+        const created = await this.CreateRoomWithSeats([user]);
+        if (!created) return null;
+        return { room_name: created.room_name, room_id: created.room_id, reservation: created.reservations[0] };
+    }
+
+    // 켜진 채널 중 빈 곳에 방을 만들고 users 순서대로 좌석을 예약한다. 2인/1인 방 생성이 함께 쓴다.
+    private async CreateRoomWithSeats(
+        users: UserInfo[]
+    ): Promise<{ room_name: string; room_id: string; reservations: SeatReservation[] } | null> {
         const alive_channel_numbers = await channelHeartbeat.GetAliveGameChannels(this.game_type, this.channel_count);
 
         for (const channel_no of alive_channel_numbers) {
@@ -151,10 +176,12 @@ export class GameRoomMatcher {
 
             try {
                 const room_cache = await matchMaker.createRoom(room_name, {});
-                const [seat_user_a, seat_user_b] = await Promise.all([this.ToSeatUser(user_a), this.ToSeatUser(user_b)]);
-                const reservation_a = await matchMaker.reserveSeatFor(room_cache, {}, { user: seat_user_a } satisfies GameSeatAuth);
-                const reservation_b = await matchMaker.reserveSeatFor(room_cache, {}, { user: seat_user_b } satisfies GameSeatAuth);
-                return { room_name, room_id: room_cache.roomId, reservation_a, reservation_b };
+                const seat_users = await Promise.all(users.map((user) => this.ToSeatUser(user)));
+                const reservations: SeatReservation[] = [];
+                for (const seat_user of seat_users) {
+                    reservations.push(await matchMaker.reserveSeatFor(room_cache, {}, { user: seat_user } satisfies GameSeatAuth));
+                }
+                return { room_name, room_id: room_cache.roomId, reservations };
             } catch (error) {
                 console.error(`[GameRoomMatcher] ${room_name} 방 생성/좌석 예약 실패:`, error instanceof Error ? error.message : error);
                 // 이 채널에서 문제가 생기면 다음 채널로 넘어간다
