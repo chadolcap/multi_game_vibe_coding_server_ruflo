@@ -25,6 +25,17 @@ export interface AirhockeyReplayPayload {
 
 // --- S→C ---
 
+// SERVE_SELECT — 게임의 첫 서브 유저(시트 "서브 선 진행권", 2026-10-29). GAME_START 5초 전에 보낸다.
+// 클라이언트는 동전 던지기 연출 후 동전에 이 userid 의 이름을 표시한다.
+export interface AirhockeyServeSelectPayload {
+    userid: string;
+}
+
+// ONE_START — 한 판 시작. serve = 이번 판에 서브할 유저(시트, 2026-10-29). 퍽은 그 유저 쪽에서 시작한다.
+export interface AirhockeyOneStartPayload {
+    serve: string;
+}
+
 // PUCK_MOVE — 퍽의 현재 위치(받는 유저 기준). 움직이는 동안 30Hz 로 보내고, 멈춰 있으면 보내지 않는다.
 // vel 🔸 은 시트에 없는 확장(2026-10-15 사용자 결정) — 퍽 속도(단위/초, 받는 유저 기준). 클라이언트가 다음
 // 패킷까지 `loc + vel × 경과초` 로 위치를 예측해 부드럽게 그릴 수 있다. 멈추면 {0,0} 이 한 번 온다.
@@ -70,12 +81,14 @@ export interface AirhockeyGameResultPayload {
 // 시트: `puck:loc:{x,y}`, `LEVER0`, `LEVER1`.
 //   LEVER0 / LEVER1: ENTER_ROOM 의 player1 / player2 레버 (오델로 status0/status1 과 같은 순서 관례)
 //   win_count0 / win_count1 🔸: 시트에 없는 확장 — 재접속한 유저가 점수판을 되찾을 방법이 이것뿐이다
+//   server: 지금 판(골 연출 중이면 방금 끝난 판)의 서브 유저 — 시트 `server:유저아이디`, ONE_START 를 놓친 재접속 유저용 (2026-10-29)
 export interface AirhockeyGameStatusPayload {
     puck: { loc: AirhockeyPoint; vel: AirhockeyPoint }; // vel 🔸 은 PUCK_MOVE 와 같은 확장
     LEVER0: AirhockeyPoint;
     LEVER1: AirhockeyPoint;
     win_count0: number;
     win_count1: number;
+    server: string;
 }
 
 // --- 서버 내부 상태 (절대 좌표: player1 이 아래, player2 가 위) ---

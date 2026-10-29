@@ -63,6 +63,34 @@ export function CreatePuck(): AirhockeyPuckState {
     return { x: 0, y: 0, vx: 0, vy: 0 };
 }
 
+// 서브용 퍽 — 중앙에서 서브할 쪽(serve_side)으로 AIRHOCKEY_SERVE_PUCK_OFFSET 떨어진 자리에 멈춘 채 놓는다(2026-10-29).
+export function CreateServePuck(serve_side: AirhockeySide): AirhockeyPuckState {
+    const offset = airhockeyConstants.AIRHOCKEY_SERVE_PUCK_OFFSET;
+    return { x: 0, y: serve_side === 0 ? -offset : offset, vx: 0, vy: 0 };
+}
+
+// --- 서브 ---
+
+// 동전 던지기 — 게임의 첫 서브를 랜덤으로 고른다. random 은 테스트용 주입.
+export function PickCoinTossSide(random: () => number = Math.random): AirhockeySide {
+    return random() < 0.5 ? 0 : 1;
+}
+
+// 지금 판의 서브 쪽 — 탁구 규칙. 첫 서브(first_side)부터 AIRHOCKEY_SERVES_PER_TURN(2)점마다 바꾸고,
+// 양쪽이 (승리 골 - 1) 이상인 듀스부터는 1점마다 바꾼다. 득점 수만으로 정해지므로 정체 재시작(골 없음)은 같은 서브다.
+// (3골 선승이면 듀스는 2:2 한 판뿐이라 실제로는 "2점마다"와 결과가 같다 — 승리 골 수를 바꿔도 맞게 일반화해 둔다)
+export function GetServeSide(first_side: AirhockeySide, goals0: number, goals1: number): AirhockeySide {
+    const deuce_from = airhockeyConstants.AIRHOCKEY_WIN_GOALS - 1;
+    const total = goals0 + goals1;
+    const per_turn = airhockeyConstants.AIRHOCKEY_SERVES_PER_TURN;
+    const turns =
+        goals0 >= deuce_from && goals1 >= deuce_from
+            ? Math.floor((deuce_from * 2) / per_turn) + (total - deuce_from * 2)
+            : Math.floor(total / per_turn);
+    if (turns % 2 === 0) return first_side;
+    return first_side === 0 ? 1 : 0;
+}
+
 // 레버의 처음 자리 = 자기 골대 앞 수비 위치.
 export function GetLeverHome(side: AirhockeySide): AirhockeyPoint {
     const y = -HALF_HEIGHT + airhockeyConstants.AIRHOCKEY_BOT_HOME_OFFSET;
@@ -151,7 +179,7 @@ export function SnapLever(lever: AirhockeyLeverState, point: AirhockeyPoint, now
 // --- 물리 한 틱 ---
 
 // dt_sec 만큼 세상을 진행한다. 퍽과 레버를 제자리에서 바꾸고, 골이 들어가면 넣은 쪽을 돌려준다.
-// 골이 들어간 순간 계산을 멈춘다(퍽은 골대 안 위치에 남는다 — 다음 판에서 CreatePuck 으로 되돌린다).
+// 골이 들어간 순간 계산을 멈춘다(퍽은 골대 안 위치에 남는다 — 다음 판에서 CreateServePuck 으로 되돌린다).
 export function StepWorld(
     puck: AirhockeyPuckState,
     levers: readonly AirhockeyLeverState[],
@@ -232,6 +260,15 @@ export function MoveLeversOnly(levers: readonly AirhockeyLeverState[], dt_sec: n
 // 판을 시작할 때(퍽이 중앙에 놓일 때) 새로 만든다.
 export function CreateStuckWatch(puck: AirhockeyPuckState): AirhockeyStuckWatch {
     return { anchor_x: puck.x, anchor_y: puck.y, still_sec: 0 };
+}
+
+// 서브를 했나 — 퍽이 이번 판 서브 자리(CreateServePuck)에서 AIRHOCKEY_STUCK_RADIUS 밖으로 나갔으면 서브한 것이다.
+// 살짝 건드려 반경 안에서만 움직인 건 서브가 아니다. 한 번 나간 뒤에는 룸이 서브 대기를 끝내므로 다시 묻지 않는다.
+export function HasPuckLeftServe(puck: AirhockeyPuckState, serve_side: AirhockeySide): boolean {
+    const serve_puck = CreateServePuck(serve_side);
+    const dx = puck.x - serve_puck.x;
+    const dy = puck.y - serve_puck.y;
+    return dx * dx + dy * dy > airhockeyConstants.AIRHOCKEY_STUCK_RADIUS * airhockeyConstants.AIRHOCKEY_STUCK_RADIUS;
 }
 
 // 매 틱 부른다. 퍽이 anchor 에서 AIRHOCKEY_STUCK_RADIUS 밖으로 나가면 그 자리를 새 anchor 로 삼고 시간을 0 으로 되돌린다.

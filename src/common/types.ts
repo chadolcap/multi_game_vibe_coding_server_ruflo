@@ -93,6 +93,7 @@ export const MessageType = {
     // 에어하키(airhockey) 전용 (2026-10-15, payload 는 game/airhockey/airhockeyTypes.ts). 엑셀본 `airhockey` 시트 기준.
     // ONE_START / ONE_RESULT 는 RPS 와 같은 이름을 쓴다(한 골 = 한 판). 좌표는 **받는 유저 기준**(내가 아래쪽).
     // ⚠️ 둘 다 초당 수십 번 오가므로 C↔S 로그를 남기지 않는다(log.ts HIGH_FREQUENCY_MESSAGE_TYPES).
+    SERVE_SELECT: "SERVE_SELECT",                     // S→C { userid } — 첫 서브 동전 던지기 결과. 5초 뒤 GAME_START (2026-10-29)
     PUCK_MOVE: "PUCK_MOVE",                           // S→C { loc:{x,y} } — 서버가 계산한 퍽 위치
     LEVER_MOVE: "LEVER_MOVE",                         // C→S { loc:{x,y} } / S→C { user, loc } — 상대 레버 위치 중계
 

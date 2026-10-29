@@ -71,6 +71,7 @@ export const AIRHOCKEY_BOT_RETREAT_PUCK_SPEED = 250; // 퍽이 이보다 느릴 
 
 // ── 진행 ──
 export const AIRHOCKEY_WIN_GOALS = 3; // 3골 먼저 넣으면 승리 (시트/사용자: "총 3점을 먼저 획득한 유저가 승자")
+export const AIRHOCKEY_SERVE_SELECT_DELAY_SEC = 5; // SERVE_SELECT(동전 던지기) 뒤 GAME_START 까지 (시트 "5초 후 GAME_START")
 export const AIRHOCKEY_GAME_START_DELAY_SEC = 3; // GAME_START 뒤 첫 ONE_START 까지 (임시 — 시작 연출 시간)
 export const AIRHOCKEY_ONE_RESULT_DELAY_SEC = 3; // 골(ONE_RESULT) 뒤 다음 ONE_START 까지 (임시 — 영상의 "GOAL!" 연출 시간)
 export const AIRHOCKEY_RESULT_DELAY_SEC = 3; // 마지막 골 뒤 GAME_RESULT 까지 (RPS/점핑과 같은 마지막 연출 대기)
@@ -85,6 +86,19 @@ export const AIRHOCKEY_STUCK_RESET_SEC = 10;
 // 를 보내고 일반 결과와 같은 재게임 선택을 받는다(기록 없음). 판이 시작됐는데 양쪽 다 가만히 있는 경우(방치) —
 // 사용자 결정(2026-10-15). 골이 나면 횟수는 0 으로 돌아간다. 양쪽이 가만히 있으면 첫 ONE_START 부터 약 40초(10초 × 4).
 export const AIRHOCKEY_STUCK_MAX_RESTARTS = 3;
+
+// ── 서브 (2026-10-29 사용자 결정) ──
+// 게임의 첫 서브는 동전 던지기(SERVE_SELECT), 그 뒤는 탁구 규칙 — 2점마다 서브를 바꾸고, 양쪽이
+// (승리 골 - 1) 에 도달한 듀스부터는 1점마다 바꾼다(GetServeSide). 같은 상대와 재게임하면 직전 게임에서
+// 리시브로 시작한 쪽이 첫 서브를 한다(탁구의 게임 교대). 새 상대(기다리는 방)는 다시 동전 던지기.
+export const AIRHOCKEY_SERVES_PER_TURN = 2;
+// 매 판 퍽은 중앙에서 **서브할 유저 쪽으로** 이만큼 떨어진 자리(x=0)에 멈춘 채 시작한다(사용자 결정: 고정 200).
+// 레버는 중앙선을 못 넘으므로(ClampLeverPosition) 받는 쪽은 먼저 칠 수 없다.
+export const AIRHOCKEY_SERVE_PUCK_OFFSET = 200;
+// ONE_START 뒤 이 시간 동안 서브를 안 하면(퍽이 서브 자리에서 AIRHOCKEY_STUCK_RADIUS 밖으로 안 나가면) 서브권이 상대에게
+// 넘어간다 — 점수 없음, 정체 재시작 횟수에도 안 넣음, 다음 골부터는 다시 골 수 기준 탁구 순서(사용자 결정 2026-10-29).
+// 서브를 기다리는 동안은 퍽 정체(AIRHOCKEY_STUCK_RESET_SEC) 판정을 하지 않는다.
+export const AIRHOCKEY_SERVE_TIMEOUT_SEC = 10;
 // ── 랭킹 점수 ──
 // 넣은 골 수 × 5점. 승패와 상관없이 양쪽 모두 받는다(사용자 결정: 시트 "승리 점수 : 1판에 5점").
 export const AIRHOCKEY_SCORE_PER_GOAL = 5;

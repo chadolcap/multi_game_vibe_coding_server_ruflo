@@ -94,7 +94,7 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 | `npm run pm2:start` | 운영 규모 전체 (게임 채널 상수를 먼저 올려야 함) |
 | `npm run pm2:status` / `pm2:logs` / `pm2:stop` / `pm2:restart` | 상태 / 로그 / graceful 정지 / 재시작 |
 | `npm run db:init` | DB 생성 + 스키마 + 이번 달 로그 테이블 (여러 번 실행해도 안전) |
-| `npm test` | 단위 테스트 (205개) |
+| `npm test` | 단위 테스트 (211개) |
 
 - PM2 설정은 `ecosystem.config.cjs` 입니다. PM2 가 `require()` 로 읽기 때문에 `.cjs` 여야 합니다.
 - `kill_timeout` 은 **12분**입니다. 게임 채널의 드레인(최대 10분)보다 짧으면 무중단 재시작이 무의미해집니다.
@@ -102,6 +102,26 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 - ⚠️ `taskkill /F` 를 반복하면 Redis 방 레지스트리에 유령 방이 남습니다. 가능하면 `pm2 stop` 이나 Ctrl+C 를 쓰세요.
 - ⚠️ `EADDRINUSE`: `netstat -ano | findstr 6021` 로 PID 를 찾고, **죽이기 전에 의도적으로 띄운 서버인지 확인**하세요. 옛 빌드로 떠 있는 좀비가 "고친 코드가 반영 안 된 것처럼" 보이게 만든 적이 있습니다. Git Bash 에서는 `taskkill //PID <PID> //T //F` 처럼 씁니다.
 - `pm2 install` 시 나오는 `npm audit` high 경고는 안 쓰는 `pm2 deploy` 의존성이라 보류했습니다.
+
+
+### 서버 코드 수정 후 재실행 (작업 규칙, 2026-10-29 사용자 결정)
+
+서버 코드를 고치면 **빌드 + 영향받는 서버 재실행까지 끝내야 완료**입니다. 클라이언트가 바로 새 코드로 테스트할 수 있어야 합니다.
+
+1. `npm run build`
+2. 아래 표대로 영향받는 프로세스만 `npx pm2 restart <이름…>` (예: `npx pm2 restart airhockey_1`). 개발 서버가 꺼져 있었으면 `npm run pm2:start:dev`
+3. `pm2 jlist` 의 `online`·재시작 횟수와 포트 LISTENING(`netstat -ano`)을 둘 다 확인한 뒤 보고
+
+| 고친 곳 | 재실행 대상 |
+|---|---|
+| `game/{game}/`, `db/{game}*`, `queries/{game}*` | 그 게임 채널(`{game}_1`) |
+| `game/lobby/`, `game/room/`(매칭 — 로비에서 돎), `db/user*`·랭킹 조회 | `lobby_1` (+ 게임 결과 쪽 랭킹·통계 쓰기를 고쳤으면 해당 게임 채널) |
+| `watch/` | `watcher` |
+| `common/`, `db/connection.ts`·`redis.ts`, `index.ts`, `.env` | 전부 (`npm run pm2:restart` 또는 dev 프로세스 이름 전부) |
+| 문서·`scripts/check-*.mjs`·테스트만 | 재실행 없음 |
+
+- 검증 스크립트를 돌리려고 서버를 띄웠다면, 끝난 뒤 **내리지 않고 최신 빌드로 떠 있는 상태로 둡니다**.
+- ⚠️ 게임 채널 재시작은 SIGINT 드레인(8-2)이라 **진행 중인 게임이 있으면 끝날 때까지(최대 10분) 기다립니다.** 사용자가 클라이언트로 게임 중인지 `~/.pm2/logs/<채널>-out.log` 로 먼저 확인하세요.
 
 ---
 
@@ -282,12 +302,14 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    RD[양쪽 READY] --> GS[GAME_START]
-    GS -->|3초| OS[ONE_START<br/>퍽 중앙 정지]
+    RD[양쪽 READY] --> SS[SERVE_SELECT userid<br/>동전 던지기]
+    SS -->|5초| GS[GAME_START]
+    GS -->|3초| OS[ONE_START serve<br/>퍽 서브 쪽 200 정지]
     OS --> P{PUCK_MOVE / LEVER_MOVE<br/>30Hz}
     P -->|골| OR[ONE_RESULT win, win_count]
     OR -->|3골 전, 3초| OS
-    P -->|퍽이 10초간 제자리<br/>재시작 3번까지| OS
+    P -->|서브 안 하고 10초<br/>서브권 상대에게, 점수 없음| OS
+    P -->|서브 뒤 퍽이 10초간 제자리<br/>재시작 3번까지| OS
     P -->|재시작 3번 뒤 또 정체| GI[즉시 GAME_RESULT draw:Y<br/>→ 재게임 선택, 기록 없음]
     OR -->|3골, 3초| GR[GAME_RESULT]
 ```
@@ -298,11 +320,13 @@ flowchart LR
 | 테이블     | 720×1280, 골대 입구 260, 퍽 반지름 30, 레버 반지름 60 — ⚠️ **임시값**, 클라이언트와 반드시 같아야 함. 영상의 꺾인 옆벽은 연출, 충돌은 직사각형(사용자 결정)                                                                                                                                                                                          |
 | 레버      | 자기 쪽 절반 안으로 잘라서 받음(중앙선 못 넘음). 서버 레버는 `LEVER_MOVE` 도착 간격(이동평균)을 재서 **다음 입력이 올 때쯤 도착하는 일정한 속도**로 따라감 = 서버 레버 속도가 손 속도. 상한 3000/초(순간이동 조작 방지). 위처럼 따라가는 점은 **"손"** 이고, 레버는 그 손을 **무게(1차 지연, τ=0.05초 `AIRHOCKEY_LEVER_WEIGHT_SEC`)** 로 늦게 따라감: 매 틱 `레버 += (손-레버)×(1-e^(-dt/τ))` — 짧게 툭 친 타격은 약하게, 길게 휘두르면 손 속도 그대로(2026-10-22 사용자 요청 "퍽이 너무 쉽게 튐"). **봇은 무게 없음**(`has_weight`)                                                                                                                                                        |
 | 타격      | 유한 질량 충돌식: 퍽 법선 속도 변화 = `-(1+e)·M/(M+1)·상대속도`, e=0.65, M=4 → 멈춘 퍽을 V 로 치면 **약 1.3V**. 퍽 상한 2800                                                                                                                                                                                                   |
-| 시작 / 선공 | 매 판 퍽은 중앙(0,0)에 멈춘 채 시작, 먼저 친 쪽이 선공(시트)                                                                                                                                                                                                                                                           |
+| 서브 | **첫 서브 = 동전 던지기**(`SERVE_SELECT`, 5초 뒤 `GAME_START`), 그 뒤는 **탁구 규칙** — 2점마다 서브 교대, 양쪽 (승리 골-1) 이상인 듀스부터 1점마다(`GetServeSide`, 3골 선승이면 F,F,상대,상대,F). 정체 재시작은 골이 없으니 같은 서버. **같은 상대 재게임은 직전 게임의 리시브 쪽이 첫 서브**(탁구 교대, `next_first_serve_side`), 새 상대(기다리는 방)는 다시 동전 던지기. `SERVE_SELECT` 5초도 게임 중으로 취급(2026-10-29 사용자 결정) |
+| 서브 제한 | `ONE_START` 뒤 **10초** 안에 서브를 안 하면(퍽이 서브 자리에서 반경 30 밖으로 안 나가면, `HasPuckLeftServe`) **서브권이 상대에게** — 골·점수 없이 `ONE_START{serve:상대}` 부터 다시(`PassServe`, `AIRHOCKEY_SERVE_TIMEOUT_SEC`). 넘김은 그 판에만, 다음 골부터는 다시 골 수 기준 탁구 순서. **정체 재시작 횟수에 안 셈** → 양쪽이 계속 안 치면 서브가 끝없이 오감(2026-10-29 사용자 결정). 서브 대기 중에는 퍽 정체 판정 안 함 |
+| 판 시작 퍽 | 매 판 퍽은 **서브할 유저 쪽으로 중앙에서 200**(`AIRHOCKEY_SERVE_PUCK_OFFSET`, x=0 고정)에 멈춘 채 시작(`CreateServePuck`) — 서버 화면 `(0,-200)`, 받는 쪽 화면 `(0,200)`. 레버가 중앙선을 못 넘으므로 받는 쪽은 먼저 칠 수 없음. 예전 "중앙에서 먼저 친 쪽이 선공"은 폐지 |
 | 판 시작 레버 | `ONE_START` 때 레버의 **이전 궤적(속도·따라가던 목표·입력 간격)을 버리고** 그 자리에 멈춤. 그 판의 **첫** `LEVER_MOVE` **는 그 좌표에 바로 놓고(속도 0)**, 두 번째부터 평소처럼 따라감(사용자 결정, `ResetLeverMotion`/`SnapLever`). 퍽 위에 놓여도 치지 않고 밀어내기만 함                                                                                                     |
 | 승리      | **3골 선취**. 제한 시간 없음(사용자 결정). 무승부(`draw:"Y"`)는 ① 둘 다 나갔는데 골 수가 같을 때 ② 정체 무효일 때뿐                                                                                                                                                                                                                    |
-| 퍽 정체    | 퍽이 **10초** 동안 처음 자리에서 반경 30 밖으로 못 나가면 골 없이 **이번 판만 다시**(점수 유지, `ONE_START` 부터). 레버 사이·구석 끼임, 퍽 독점을 함께 막음(사용자 결정, `AIRHOCKEY_STUCK_`*)                                                                                                                                                             |
-| 정체 무효   | 골 없이 정체 재시작을 **3번** 한 뒤 또 정체되면(4번째) **게임 무효** — **즉시** `GAME_RESULT{draw:"Y"}`(winner/loser = player1/player2, score 0, win_per 미반영) → 일반 결과와 같은 10초 재게임 선택. 별도 알림 메시지 없음(`GAME_INVALID` 는 사용자 결정으로 제거). DB 로그·통계·랭킹 없음. 골이 나면 횟수 0. 양쪽 방치면 `GAME_START` 부터 약 43초(`AIRHOCKEY_STUCK_MAX_RESTARTS`) |
+| 퍽 정체    | **서브한 뒤** 퍽이 **10초** 동안 처음 자리에서 반경 30 밖으로 못 나가면 골 없이 **이번 판만 다시**(점수 유지, `ONE_START` 부터). 레버 사이·구석 끼임, 퍽 독점을 함께 막음(사용자 결정, `AIRHOCKEY_STUCK_`*). 같은 서버(서브 넘김으로 바뀐 서버여도 그대로)가 다시 서브                                                                                                                                                             |
+| 정체 무효   | 골 없이 정체 재시작을 **3번** 한 뒤 또 정체되면(4번째) **게임 무효** — **즉시** `GAME_RESULT{draw:"Y"}`(winner/loser = player1/player2, score 0, win_per 미반영) → 일반 결과와 같은 10초 재게임 선택. 별도 알림 메시지 없음(`GAME_INVALID` 는 사용자 결정으로 제거). DB 로그·통계·랭킹 없음. 골이 나면 횟수 0(`AIRHOCKEY_STUCK_MAX_RESTARTS`). ⚠️ 2026-10-29 부터 **양쪽 방치(아무도 서브 안 함)는 무효가 안 되고 서브 넘김만 반복** — 무효는 서브한 뒤의 정체로만 남 |
 | 랭킹 점수   | **넣은 골 수 × 5점**, 패자도 받음(사용자 결정, 시트 "1판에 5점")                                                                                                                                                                                                                                                      |
 | 끊김 / 퇴장 | 공통 자동 모드 규칙(6-4) — **서버 봇이 레버를 조종**(끊기는 즉시). 재접속하면 `GAME_STATUS` 받고 본인 조종                                                                                                                                                                                                                         |
 | 둘 다 나감  | 그 시점 골 수로 즉시 종료                                                                                                                                                                                                                                                                                   |
@@ -482,12 +506,13 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 
 | type        | 방향        | payload                                                           | 비고                                                                                                                                                           |
 | ----------- | --------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| GAME_START  | S→C       | `{}`                                                              | 시트 비고의 "MAP_SEELCT 후 2초"는 점핑 시트 복사 흔적 — 맵 없음, READY 직후                                                                                                       |
-| ONE_START   | S→C       | `{}`                                                              | 한 판(한 골) 시작. 직후 `PUCK_MOVE (0,0)` 한 번                                                                                                                        |
+| SERVE_SELECT | S→C      | `{userid}`                                                        | 첫 서브 유저(동전 던지기 결과, 재게임은 교대). READY 직후, **5초 뒤** `GAME_START`. 클라이언트는 동전 던지기 연출 후 동전에 이 유저의 이름 표시                                                                                  |
+| GAME_START  | S→C       | `{}`                                                              | `SERVE_SELECT` 5초 뒤. 시트 비고의 "MAP_SEELCT 후 2초"는 점핑 시트 복사 흔적 — 맵 없음                                                                                                       |
+| ONE_START   | S→C       | `{serve}`                                                         | 한 판(한 골) 시작, `serve` = 이번 판 서브 유저. 직후 서브 쪽 `PUCK_MOVE` 한 번(서버 기준 `(0,-200)`)                                                                                                                        |
 | PUCK_MOVE   | S→C       | `{loc:{x,y}, vel🔸:{x,y}}`                                        | 받는 유저 기준, 정수. 움직일 때만 30Hz. `vel`(단위/초)로 다음 패킷까지 위치 예측 가능, 멈추면 `vel (0,0)` 이 한 번 옴                                                                            |
 | LEVER_MOVE  | C→S / S→C | `{loc:{x,y}}` / `{user, loc}`                                     | 내 기준 좌표. 중계는 **상대에게만**, 상대 기준으로 뒤집어서. 봇 레버도 같은 경로                                                                                                            |
 | ONE_RESULT  | S→C       | `{win, win_count}`                                                | 골 넣은 유저와 그 유저의 누적 골                                                                                                                                          |
-| GAME_STATUS | S→C       | `{puck:{loc, vel🔸}, LEVER0, LEVER1, win_count0🔸, win_count1🔸}` | 재접속 당사자에게만, 그 유저 기준 좌표. LEVER0/1 = player1/2                                                                                                                 |
+| GAME_STATUS | S→C       | `{puck:{loc, vel🔸}, LEVER0, LEVER1, win_count0🔸, win_count1🔸, server}` | 재접속 당사자에게만, 그 유저 기준 좌표. LEVER0/1 = player1/2. `server` = 지금(시트)(골 연출 중이면 방금 끝난) 판의 서버                                                                                                                 |
 | GAME_RESULT | S→C       | `{winner, loser, draw}` — `{userid, win_count, score, win_per}`   | `win_count` = 골 수, `score` = 골×5. `draw` **는 항상** `"Y"`**/**`"N"` — 클라이언트는 이 값으로 결과 화면을 고름. `"Y"` = 둘 다 나갔는데 골 수 같음 또는 정체 무효(winner/loser = player1/player2) |
 
 ### 7-5-3. 청기백기 (1인)
@@ -645,7 +670,7 @@ erDiagram
 | `check-othello-abandon.mjs` | 퇴장 · 자동 2초 · 재입장 · OUT_USER 시점 | consent/drop 각 41/41 |
 | `check-rps-abandon.mjs` | 퇴장 · 즉시 판정 · 둘 다 퇴장 | consent/drop 각 37/37 |
 | `check-stepping-game.mjs` | 매칭 → 맵 → MOVE_INFO 검증(무시 3종) → 4번째 추락 종료 → 결과 3초 대기 → 재게임 + 퇴장 → 60초 종료 → OUT_USER → DB | 34/34 (수정 전 빌드에서 3초 대기 2건 실패 확인) |
-| `check-airhockey-game.mjs` | 매칭 → 좌표 뒤집기·중앙선 자르기 → 퍽 정체 10초 → 판 다시 시작 → 판의 첫 LEVER_MOVE 가 끌려오지 않고 바로 놓임 → 슛·골(양쪽 궤적 반대) → 골 연출 중 끊김·재접속 `GAME_STATUS` → 3골 → 결과 3초 → 재게임 + 퇴장(봇이 3골) → OUT_USER → 재게임 무응답 10초 → RETURN_TO_LOBBY → DB. 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리는 돈다. `MODE=invalid` = 양쪽 방치 → 재시작 3번 → 4번째 정체에서 즉시 `GAME_RESULT{draw:"Y"}`(GAME_INVALID 없음) → A `N` 즉시 / B 무응답 10초 로비, activeGame·DB 기록 없음(약 65초) | 54/54, invalid 24/24 (봇을 끈 빌드에서 8건, clock 수정 전 빌드에서 무응답 1건, 고정 스텝 수정 전 빌드에서 정체 2건 실패 확인) |
+| `check-airhockey-game.mjs` | 매칭 → `SERVE_SELECT`(양쪽 같은 값) 5초 → `GAME_START` → 좌표 뒤집기·중앙선 자르기 → `ONE_START.serve`·서브 쪽 퍽 → 서브 안 하고 10초 → 서브권 상대에게 → 또 10초 → 다시 돌아옴(점수 없음) → 판의 첫 LEVER_MOVE 가 끌려오지 않고 바로 놓임 → 서버가 슛·골(양쪽 궤적 반대) → 골 연출 중 끊김·재접속 `GAME_STATUS`(server 포함) → 매 판 탁구 서브 순서 확인, 서버가 골 → 첫 서버 3:2 → 결과 3초 → 재게임 첫 서브 교대 + 퇴장(A 서브 판은 살짝 넘겨 주고 봇이 3골) → OUT_USER → 재게임 무응답 10초 → RETURN_TO_LOBBY → DB. **첫 서브가 랜덤이라 승자·DB 기댓값은 SERVE_SELECT 로 계산**(약 80초). 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리는 돈다. `MODE=invalid` = 첫 서버 서브 안 함 → 10초 뒤 서브권 넘김(횟수 안 셈) → 넘겨받은 유저가 판마다 살살 서브 후 방치 → 같은 서버로 정체 재시작 3번 → 4번째 정체에서 즉시 `GAME_RESULT{draw:"Y"}`(GAME_INVALID 없음) → A `N` 즉시 / B 무응답 10초 로비, activeGame·DB 기록 없음(약 90초) | 72/72, invalid 28/28 (서브 제한 반영 2026-10-29. 그 전 71/71 은 A·B 첫 서브 각각 2회 이상 확인, 봇을 끈 빌드에서 8건, clock 수정 전 빌드에서 무응답 1건, 고정 스텝 수정 전 빌드에서 정체 2건 실패 확인) |
 | `check-flag-game.mjs` | 즉시 MATCH_FOUND(opponent 없음) → ENTER_ROOM player1 만 → 대표 정답 즉시 Y(뒤에 보낸 답 무시) / 반대 방향 정답(내리지마→올림) / 깃발 둘 중 하나만 보냄 또는 틀린 방향 즉시 N / 무응답 5초 N(answer null) → 결과 3초 → 재게임 만점 → 무응답 10초 RETURN_TO_LOBBY → 게임 중 LEAVE·소켓 끊김 각각 현재 점수 저장 + 방 제거 + REJOIN_GAME 없음 → DB 4행·정답 누적·랭킹 → 모든 `QUEST_SHOW.say` 가 quest 와 맞는지. 1인이라 실제 클라이언트와 매칭이 섞이지 않음(약 100초) | 30/30 |
 | `check-admin-login.mjs` / `check-send-notice.mjs` / `check-enter-lobby.mjs` | 관리자 보안 / 공지 필터 / 로비 payload | 통과 |
 
@@ -730,4 +755,5 @@ erDiagram
 | 에어하키 지연 보상 | 서버 권위 물리라 내 레버 → 퍽 반응에 왕복 지연이 그대로 보임. 클라이언트는 `PUCK_MOVE.vel` 로 예측해 그려야 함 |
 | 에어하키 클라이언트 (사용자 작업) | ① `PUCK_MOVE` 를 `loc + vel×경과초` 로 예측해 그리기(안 하면 30Hz 로 뚝뚝 끊김) ② `GAME_RESULT.draw` 로 결과 화면 분기(`"Y"` = 무승부·무효) ③ `LEVER_MOVE` 를 손가락 위치로 계속 보내기(판의 첫 입력이 시작 위치). **보내는 값은 손가락 위치 그대로**, 내 레버를 **그릴 때만** 서버와 같은 무게 공식(τ=0.05, 손=손가락, 0.5 이내면 딱 맞춤, 판의 첫 입력은 바로 놓기)을 적용. 상대 레버는 다시 늦추지 않음 ④ 테이블·퍽·레버 크기를 서버 값과 일치 — 신고 화면에서 퍽이 테두리 밖에 그려져 크기/비율 차이가 의심됨 |
 | 청기백기 클라이언트 (사용자 작업) | `game:"flag"` 매칭, 상단 문제 판넬·가운데 오리·손마다 올림/정지/내림 버튼 UI, `QUEST_SHOW` 송수신(`say` 로 문장 만들기, `quest` 로 정답 포즈 이미지 9장 중 선택, 문제에 나온 깃발 수만큼 눌리면 **한 번에** 전송), `MATCH_FOUND.opponent`/`ENTER_ROOM.player2` 없는 경우 처리. 시트 flag 탭 H열(빨간 글씨)이 서버 기준 |
-| 엑셀 시트 반영 (사용자 작업) | 에어하키: `GAME_RESULT.draw` 항상 Y/N(정체 무효 = draw:Y), 판 시작 레버 규칙, 퍽 정체 10초 재시작, `PUCK_MOVE.vel`, `GAME_START` 비고(맵 없음), `GAME_STATUS.win_count0/1`, `GAME_RESULT.score`=골×5·`draw` 조건, 좌표계·테이블 크기. 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |
+| 에어하키 서브 클라이언트 (사용자 작업, 2026-10-29) | `SERVE_SELECT{userid}` 받으면 동전 던지기 연출 + 동전에 그 유저 이름(`ENTER_ROOM` 의 player 이름) 표시, 5초 뒤 `GAME_START`. `ONE_START.serve` 로 서브 표시, 퍽은 서버 쪽 `(0,∓200)` 에서 시작(첫 `PUCK_MOVE` 로 옴). 재접속은 `GAME_STATUS.server`. **서브 10초 초과 시 `ONE_START{serve:상대}` 가 다시 옴**(ONE_RESULT 없음) — 같은 판 다시 시작으로 처리, 필요하면 서브 제한 카운트다운 표시 |
+| 엑셀 시트 반영 (사용자 작업) | 에어하키: 서브 10초 제한·서브권 넘김(점수 없음, 무효 횟수 안 셈), `PUCK_MOVE` 비고 "퍽의 처음 위치는 중앙선" → 서브 쪽 200, 재게임 첫 서브 교대. `GAME_RESULT.draw` 항상 Y/N(정체 무효 = draw:Y), 판 시작 레버 규칙, 퍽 정체 10초 재시작, `PUCK_MOVE.vel`, `GAME_START` 비고(맵 없음), `GAME_STATUS.win_count0/1`, `GAME_RESULT.score`=골×5·`draw` 조건, 좌표계·테이블 크기. 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |

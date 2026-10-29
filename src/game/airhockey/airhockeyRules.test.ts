@@ -503,3 +503,62 @@ describe("DecideWinner / IsWinningGoals / ComputeRankScore", () => {
         assert.equal(airhockeyRules.ComputeRankScore(0), 0);
     });
 });
+
+describe("서브 — CreateServePuck / PickCoinTossSide / GetServeSide (2026-10-29)", () => {
+    const OFFSET = airhockeyConstants.AIRHOCKEY_SERVE_PUCK_OFFSET;
+
+    it("HasPuckLeftServe — 서브 자리에서 반경(30) 밖으로 나가야 서브, 반경 안에서 건드린 건 서브 아님", () => {
+        const RADIUS = airhockeyConstants.AIRHOCKEY_STUCK_RADIUS;
+        assert.equal(airhockeyRules.HasPuckLeftServe(airhockeyRules.CreateServePuck(0), 0), false);
+        assert.equal(airhockeyRules.HasPuckLeftServe({ x: RADIUS - 5, y: -OFFSET, vx: 0, vy: 0 }, 0), false);
+        assert.equal(airhockeyRules.HasPuckLeftServe({ x: RADIUS + 5, y: -OFFSET, vx: 0, vy: 0 }, 0), true);
+        // 서브 쪽 기준으로 잰다 — 위쪽(1) 서브 자리에 있는 퍽은 아래쪽(0) 서브 기준으로는 멀리 나가 있다
+        assert.equal(airhockeyRules.HasPuckLeftServe(airhockeyRules.CreateServePuck(1), 1), false);
+        assert.equal(airhockeyRules.HasPuckLeftServe(airhockeyRules.CreateServePuck(1), 0), true);
+    });
+
+    it("퍽은 서브할 쪽으로 200 떨어진 자리에 멈춘 채 놓인다 — 받는 유저 화면에서는 상대 쪽", () => {
+        assert.deepEqual(airhockeyRules.CreateServePuck(0), { x: 0, y: -OFFSET, vx: 0, vy: 0 });
+        assert.deepEqual(airhockeyRules.CreateServePuck(1), { x: 0, y: OFFSET, vx: 0, vy: 0 });
+        // side 1 이 서브하면 side 1 화면에서는 자기 쪽(아래)이다
+        assert.deepEqual(airhockeyRules.ToSideFrame(airhockeyRules.CreateServePuck(1), 1), { x: 0, y: -OFFSET });
+    });
+
+    it("받는 쪽 레버는 중앙선을 못 넘어 서브 퍽에 닿지 못한다", () => {
+        const puck = airhockeyRules.CreateServePuck(0);
+        const closest = airhockeyRules.ClampLeverPosition(1, { x: 0, y: -OFFSET });
+        assert.ok(closest.y - puck.y > PUCK_R + LEVER_R);
+    });
+
+    it("동전 던지기는 난수 0.5 미만이면 side 0, 이상이면 side 1", () => {
+        assert.equal(airhockeyRules.PickCoinTossSide(() => 0.1), 0);
+        assert.equal(airhockeyRules.PickCoinTossSide(() => 0.9), 1);
+    });
+
+    it("탁구 규칙 — 2점마다 서브를 바꾼다 (3골 선승의 모든 점수)", () => {
+        // [골0, 골1, 첫 서브가 0 일 때 서브 쪽]
+        const cases: Array<[number, number, 0 | 1]> = [
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [2, 0, 1],
+            [1, 1, 1],
+            [2, 1, 1],
+            [1, 2, 1],
+            [2, 2, 0],
+        ];
+        for (const [g0, g1, expected] of cases) {
+            assert.equal(airhockeyRules.GetServeSide(0, g0, g1), expected, `${g0}:${g1}`);
+            assert.equal(airhockeyRules.GetServeSide(1, g0, g1), expected === 0 ? 1 : 0, `첫 서브 1, ${g0}:${g1}`);
+        }
+    });
+
+    it("듀스(양쪽 승리 골-1 이상) 부터는 1점마다 바꾼다 — 승리 골 수가 늘어도 맞게", () => {
+        const deuce = airhockeyConstants.AIRHOCKEY_WIN_GOALS - 1;
+        const at_deuce = airhockeyRules.GetServeSide(0, deuce, deuce);
+        const next = airhockeyRules.GetServeSide(0, deuce + 1, deuce);
+        const next2 = airhockeyRules.GetServeSide(0, deuce + 1, deuce + 1);
+        assert.notEqual(at_deuce, next);
+        assert.notEqual(next, next2);
+    });
+});

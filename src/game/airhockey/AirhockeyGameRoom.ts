@@ -4,9 +4,11 @@
 // 구조는 SteppingGameRoom 과 의도적으로 같다 — 플랫폼 공통 부분(좌석 채우기/ENTER_ROOM/READY/재접속/
 // 재게임·기다리는 방/activeGame/roomRegistry)은 거의 그대로 가져왔고, 게임 전용 부분만 다르다:
 //   점핑:     MAP_SELECT → GAME_START → 60초 동안 MOVE_INFO → GAME_RESULT
-//   에어하키: GAME_START → (3초) → ONE_START → 실시간 물리(PUCK_MOVE / LEVER_MOVE) → 골이 나면 ONE_RESULT
+//   에어하키: SERVE_SELECT(동전 던지기) → (5초) → GAME_START → (3초) → ONE_START{serve}
+//             → 실시간 물리(PUCK_MOVE / LEVER_MOVE) → 골이 나면 ONE_RESULT
 //             → (3초) → ONE_START … → 누군가 3골 → (3초) → GAME_RESULT
 //             퍽이 10초간 거의 제자리면(끼임·독점) 골 없이 ONE_START 부터 이번 판만 다시 (RestartStuckRound)
+//             ONE_START 뒤 10초간 서브를 안 하면 점수 없이 서브권이 상대에게 넘어간다 (PassServe, 2026-10-29)
 //
 // ⚠️ 서버가 퍽 물리를 직접 계산한다(airhockeyRules.StepWorld, 60Hz). 클라이언트는 자기 레버 좌표만 보내고,
 //    서버가 30Hz 로 퍽 위치(PUCK_MOVE)와 상대 레버 위치(LEVER_MOVE)를 보낸다. 좌표는 받는 유저 기준(내가 아래).
@@ -40,11 +42,13 @@ import type {
     AirhockeyLeverMoveResultPayload,
     AirhockeyLeverState,
     AirhockeyOneResultPayload,
+    AirhockeyOneStartPayload,
     AirhockeyPlayRecord,
     AirhockeyPoint,
     AirhockeyPuckMovePayload,
     AirhockeyPuckState,
     AirhockeyReplayPayload,
+    AirhockeyServeSelectPayload,
     AirhockeySide,
     AirhockeyStuckWatch,
 } from "./airhockeyTypes.js";
@@ -87,7 +91,7 @@ export class AirhockeyGameRoom extends Room {
     private readonly entered_by_session = new Set<string>();
     private enter_room_sent = false;
     private readonly ready_by_session = new Map<string, boolean>();
-    // GAME_START 를 보낸 순간부터 true. (첫 ONE_START 전 연출 3초도 "게임 중"으로 본다)
+    // SERVE_SELECT 를 보낸 순간부터 true. (GAME_START 전 동전 연출 5초, 첫 ONE_START 전 연출 3초도 "게임 중"으로 본다)
     private game_started = false;
     private game_over = false;
     private game_started_at: Date | null = null;
@@ -116,10 +120,19 @@ export class AirhockeyGameRoom extends Room {
     private readonly lever_awaiting_first_input: [boolean, boolean] = [false, false];
     // side 별 넣은 골 수
     private readonly goals: [number, number] = [0, 0];
+    // 이번 게임의 첫 서브 쪽(동전 던지기 결과)과 지금 판의 서브 쪽 — airhockeyRules.GetServeSide 참고
+    private first_serve_side: AirhockeySide = 0;
+    private serve_side: AirhockeySide = 0;
+    // 다음 게임의 첫 서브 쪽을 미리 정해 둔 값. 같은 상대와 재게임하면 직전 게임의 리시브 쪽(탁구 교대),
+    // null 이면 StartGame 에서 동전 던지기를 한다(최초 게임, 새 상대).
+    private next_first_serve_side: AirhockeySide | null = null;
     // ONE_START ~ 골 사이에만 true — 이때만 퍽 물리를 계산한다(골 연출 중에는 퍽이 골대 안에 멈춰 있다).
     private round_active = false;
     // 퍽이 한자리에 오래 머무는지 감시한다 — AIRHOCKEY_STUCK_RESET_SEC 이 지나면 이번 판을 다시 시작(RestartStuckRound)
     private stuck_watch: AirhockeyStuckWatch = airhockeyRules.CreateStuckWatch(airhockeyRules.CreatePuck());
+    // 이번 판 서브를 아직 안 했나 (ONE_START 때 true, 퍽이 서브 자리를 벗어나면 false). true 인 동안은 정체 대신
+    // 서브 제한 시간(AIRHOCKEY_SERVE_TIMEOUT_SEC)을 본다 — 그동안 stuck_watch.still_sec 가 서브를 기다린 시간이다.
+    private serve_pending = false;
     // 골 없이 연달아 한 정체 재시작 횟수. 골이 나거나 새 게임이면 0. AIRHOCKEY_STUCK_MAX_RESTARTS 를 넘으면 무효(InvalidateGame)
     private stuck_restart_count = 0;
     // 물리 루프(setSimulationInterval)가 돌고 있는지. GAME_START 부터 게임 종료까지 돈다.
@@ -133,7 +146,7 @@ export class AirhockeyGameRoom extends Room {
     private last_sent_puck: AirhockeyPoint | null = null;
     private last_sent_puck_vel: AirhockeyPoint | null = null;
     private readonly last_sent_lever: [AirhockeyPoint | null, AirhockeyPoint | null] = [null, null];
-    // GAME_START → 첫 ONE_START 지연, ONE_RESULT → 다음 ONE_START 지연 타이머
+    // SERVE_SELECT → GAME_START 지연, GAME_START → 첫 ONE_START 지연, ONE_RESULT → 다음 ONE_START 지연 타이머
     private round_timeout: Delayed | null = null;
     // 마지막 골 뒤 AIRHOCKEY_RESULT_DELAY_SEC 를 기다렸다가 FinishGame 을 부르는 타이머 (RequestFinish 참고).
     private finish_timeout: Delayed | null = null;
@@ -402,6 +415,7 @@ export class AirhockeyGameRoom extends Room {
             LEVER1: ToClient(this.levers[1]),
             win_count0: this.goals[0],
             win_count1: this.goals[1],
+            server: this.GetUserid(this.serve_side),
         };
         messages.SendMessage(this, client, types.MessageType.GAME_STATUS, payload);
     }
@@ -422,9 +436,13 @@ export class AirhockeyGameRoom extends Room {
         this.StartGame();
     }
 
-    // GAME_START 를 보내고 물리 루프를 켠 뒤, 3초 뒤 첫 ONE_START 를 예약한다. 최초 시작(HandleReady)과 같은
+    // sessionId 순서(player1/player2) 기준 side 의 userid. 좌석은 게임 중 비지 않으므로 정상 흐름에서는 항상 있다.
+    private GetUserid(side: AirhockeySide): string {
+        return [...this.players.values()][side]?.userid ?? "";
+    }
+
+    // 첫 서브를 정해 SERVE_SELECT 를 보내고, 5초 뒤 GAME_START(StartPlay)를 예약한다. 최초 시작(HandleReady)과 같은
     // 상대와의 재게임(ResolveReplay) 둘 다 여기를 쓴다 — 재게임은 READY 를 다시 받지 않는다.
-    // (시트의 GAME_START 비고 "MAP_SEELCT 전송 후 2초"는 점핑 시트에서 복사된 흔적이다 — 에어하키에는 맵이 없다)
     private StartGame(): void {
         this.game_started = true;
         this.game_over = false;
@@ -434,9 +452,30 @@ export class AirhockeyGameRoom extends Room {
         this.goals[1] = 0;
         this.stuck_restart_count = 0;
         this.round_active = false;
-        this.puck = airhockeyRules.CreatePuck();
+        // 첫 서브 — 재게임이면 미리 정해 둔 교대 순서, 아니면 동전 던지기 (2026-10-29 사용자 결정)
+        this.first_serve_side = this.next_first_serve_side ?? airhockeyRules.PickCoinTossSide();
+        this.next_first_serve_side = null;
+        this.serve_side = this.first_serve_side;
+        this.puck = airhockeyRules.CreateServePuck(this.serve_side);
         this.levers = [airhockeyRules.CreateLever(0), airhockeyRules.CreateLever(1)];
         this.ForceResendPositions();
+
+        const payload: AirhockeyServeSelectPayload = { userid: this.GetUserid(this.first_serve_side) };
+        for (const room_client of this.clients) {
+            messages.SendMessage(this, room_client, types.MessageType.SERVE_SELECT, payload);
+        }
+
+        this.round_timeout = this.clock.setTimeout(
+            () => this.StartPlay(),
+            airhockeyConstants.AIRHOCKEY_SERVE_SELECT_DELAY_SEC * 1000
+        );
+    }
+
+    // GAME_START 를 보내고 물리 루프를 켠 뒤, 3초 뒤 첫 ONE_START 를 예약한다.
+    // (시트의 GAME_START 비고 "MAP_SEELCT 전송 후 2초"는 점핑 시트에서 복사된 흔적이다 — 에어하키에는 맵이 없다)
+    private StartPlay(): void {
+        this.round_timeout = null;
+        if (this.game_over) return;
 
         for (const room_client of this.clients) {
             messages.SendMessage(this, room_client, types.MessageType.GAME_START, {});
@@ -449,13 +488,17 @@ export class AirhockeyGameRoom extends Room {
         );
     }
 
-    // ONE_START — 한 판(한 골) 시작. 퍽을 중앙에 멈춘 채로 놓는다 — 먼저 친 유저가 선공(시트).
-    private StartRound(): void {
+    // ONE_START — 한 판(한 골) 시작. 탁구 규칙으로 이번 판의 서브 쪽을 정하고, 퍽을 그 쪽(중앙에서 200)에 멈춘 채로
+    // 놓는다(2026-10-29 사용자 결정 — 예전엔 중앙에서 시작해 먼저 친 유저가 선공). 정체 재시작(같은 서버)과 서브 넘김
+    // (상대)은 serve_side 로 서버를 직접 정한다 — 그 판에만 적용되고, 다음 골부터는 다시 골 수 기준 탁구 순서다.
+    private StartRound(serve_side?: AirhockeySide): void {
         this.round_timeout = null;
         if (this.game_over) return;
 
-        this.puck = airhockeyRules.CreatePuck();
+        this.serve_side = serve_side ?? airhockeyRules.GetServeSide(this.first_serve_side, this.goals[0], this.goals[1]);
+        this.puck = airhockeyRules.CreateServePuck(this.serve_side);
         this.stuck_watch = airhockeyRules.CreateStuckWatch(this.puck);
+        this.serve_pending = true;
         // 레버의 이전 궤적은 무시한다 — 지금 자리에 멈춰 세우고, 이 판의 첫 LEVER_MOVE 를 시작 위치로 삼는다(사용자 결정 2026-10-15).
         // 안 하면 골 연출 중 움직이던 속도·목표가 이어져, 판이 시작되자마자 옛 자리에서 끌려온 레버가 퍽을 친다.
         for (const side of [0, 1] as const) {
@@ -463,10 +506,11 @@ export class AirhockeyGameRoom extends Room {
             this.lever_awaiting_first_input[side] = true;
         }
         this.round_active = true;
+        const payload: AirhockeyOneStartPayload = { serve: this.GetUserid(this.serve_side) };
         for (const room_client of this.clients) {
-            messages.SendMessage(this, room_client, types.MessageType.ONE_START, {});
+            messages.SendMessage(this, room_client, types.MessageType.ONE_START, payload);
         }
-        // 퍽이 중앙에 멈춰 있으면 PUCK_MOVE 가 안 나가므로(바뀐 것만 보냄) 시작 위치를 한 번 바로 보낸다
+        // 퍽이 서브 자리에 멈춰 있으면 PUCK_MOVE 가 안 나가므로(바뀐 것만 보냄) 시작 위치를 한 번 바로 보낸다
         this.ForceResendPositions();
         this.SendPuck();
     }
@@ -554,8 +598,18 @@ export class AirhockeyGameRoom extends Room {
             const result = airhockeyRules.StepWorld(this.puck, this.levers, TICK_SEC);
             if (result.goal !== null) {
                 this.OnGoal(result.goal);
-            } else if (airhockeyRules.UpdateStuckWatch(this.stuck_watch, this.puck, TICK_SEC)) {
-                this.RestartStuckRound();
+            } else if (this.serve_pending && airhockeyRules.HasPuckLeftServe(this.puck, this.serve_side)) {
+                // 서브했다 — 지금부터 퍽 정체를 잰다
+                this.serve_pending = false;
+                this.stuck_watch = airhockeyRules.CreateStuckWatch(this.puck);
+            } else {
+                // 서브 전에는 퍽이 서브 자리 반경 안에 있으므로 anchor 가 안 옮겨지고 still_sec = 서브를 기다린 시간이다
+                const stuck = airhockeyRules.UpdateStuckWatch(this.stuck_watch, this.puck, TICK_SEC);
+                if (this.serve_pending) {
+                    if (this.stuck_watch.still_sec >= airhockeyConstants.AIRHOCKEY_SERVE_TIMEOUT_SEC) this.PassServe();
+                } else if (stuck) {
+                    this.RestartStuckRound();
+                }
             }
         } else {
             // 판 사이(골 연출 중)에는 퍽은 멈춰 두고 레버만 따라가게 한다 — 상대 화면에서도 레버는 계속 움직인다
@@ -582,7 +636,19 @@ export class AirhockeyGameRoom extends Room {
             `[AirhockeyGameRoom] 퍽이 ${airhockeyConstants.AIRHOCKEY_STUCK_RESET_SEC}초간 제자리 → 이번 판 다시 시작 roomId=${this.roomId} ` +
                 `puck=(${Math.round(this.puck.x)},${Math.round(this.puck.y)}) 점수=${this.goals[0]}:${this.goals[1]}`
         );
-        this.StartRound();
+        this.StartRound(this.serve_side); // 서브는 했으니 같은 유저가 다시 서브한다(서브 넘김으로 바뀐 서버여도 그대로)
+    }
+
+    // ONE_START 뒤 AIRHOCKEY_SERVE_TIMEOUT_SEC 동안 서브를 안 했다 — 점수 없이 서브권을 상대에게 넘기고 이번 판을
+    // ONE_START 부터 다시 한다. 정체 재시작 횟수에는 넣지 않는다(사용자 결정 2026-10-29 — 양쪽이 계속 안 치면 서브가
+    // 끝없이 오간다. 무효는 서브한 뒤의 정체로만 난다).
+    private PassServe(): void {
+        const next_serve_side: AirhockeySide = this.serve_side === 0 ? 1 : 0;
+        console.log(
+            `[AirhockeyGameRoom] ${airhockeyConstants.AIRHOCKEY_SERVE_TIMEOUT_SEC}초간 서브 안 함 → 서브권 넘김 roomId=${this.roomId} ` +
+                `${this.GetUserid(this.serve_side)} → ${this.GetUserid(next_serve_side)} 점수=${this.goals[0]}:${this.goals[1]}`
+        );
+        this.StartRound(next_serve_side);
     }
 
     // 게임 무효 — 즉시 무승부 결과 GAME_RESULT{draw:"Y"} 를 보내고, 일반 결과와 같게 재게임/나가기 선택을 받는다
@@ -922,8 +988,11 @@ export class AirhockeyGameRoom extends Room {
         }
 
         if (replaying_sessions.length === constants.PLAYERS_PER_ROOM) {
-            // 둘 다 재게임 — 같은 방, 같은 상대로 새 게임 시작 (GAME_START 부터, READY 는 다시 안 받음)
+            // 둘 다 재게임 — 같은 방, 같은 상대로 새 게임 시작 (SERVE_SELECT 부터, READY 는 다시 안 받음).
+            // 첫 서브는 탁구처럼 교대한다 — 직전 게임에서 리시브로 시작한 쪽 (좌석 순서는 그대로라 side 도 같다)
+            const next_first_serve_side: AirhockeySide = this.first_serve_side === 0 ? 1 : 0;
             this.ResetGameState();
+            this.next_first_serve_side = next_first_serve_side;
             this.StartGame();
         } else if (replaying_sessions.length === 1) {
             this.WaitForNewOpponent(replaying_sessions[0]);
@@ -936,6 +1005,8 @@ export class AirhockeyGameRoom extends Room {
         this.round_active = false;
         this.goals[0] = 0;
         this.goals[1] = 0;
+        // 새 상대와의 게임은 동전 던지기부터 — 같은 상대 재게임은 ResolveReplay 가 이 뒤에 다시 정한다
+        this.next_first_serve_side = null;
         this.ClearAllTimers();
         // 평소엔 FlushAbandonedPlayers() 가 게임 종료 때 이미 비웠다 — 안전장치다.
         this.abandoned_sessions.clear();
