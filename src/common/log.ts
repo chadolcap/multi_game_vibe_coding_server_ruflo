@@ -31,6 +31,7 @@ const STATS_MESSAGE_TYPES = new Set<string>([
     types.MessageType.RANK_DAILY,
     types.MessageType.RANK_WEEKLY,
     types.MessageType.GAME_RESULT,
+    types.MessageType.ADMIN_AD_LOG, // 유저별 광고 시청·star 기록
 ]);
 
 // 자격증명이 담기는 메시지 — payload 를 아예 남기지 않는다. ADMIN_LOGIN 은 {id, password} 를 통째로

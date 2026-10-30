@@ -4,6 +4,7 @@
 // ⚠️ 이 파일은 지역 변수/매개변수로 "userid" 를 많이 쓰기 때문에, common/userid.js 모듈의 import
 // alias 는 관례(파일명 그대로)를 따르지 않고 "useridUtils" 로 바꿔서 섀도잉(가려짐)을 피한다.
 import * as useridUtils from "../common/userid.js";
+import * as constants from "../common/constants.js";
 import type { EnterLobbyPayload, UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as userInfo from "./queries/userInfo.js";
@@ -24,7 +25,8 @@ export async function GetOrCreateUser(input: EnterLobbyPayload): Promise<GetOrCr
     const pool = connection.GetDbPool();
 
     const cached = await userCache.GetUserCache(userid);
-    if (cached) {
+    // star 가 없는 캐시는 star 컬럼 추가 전에 저장된 값이다 — DB 를 다시 읽어 채운다
+    if (cached && typeof cached.star === "number") {
         // 캐시 히트 — phone 은 캐시에 없으므로(위 "phone" 주석 참고) 비교/갱신을 생략한다. phone 은
         // 통계 전용 정보라 캐시 TTL(USER_CACHE_TTL_SEC) 동안 최신화가 늦어지는 걸 감수한다(2026-10-01
         // 사용자 결정) — 캐시가 만료돼 DB 를 다시 조회할 때(아래 분기) 비교/갱신된다.
@@ -49,6 +51,7 @@ export async function GetOrCreateUser(input: EnterLobbyPayload): Promise<GetOrCr
             name: "",
             avatar: useridUtils.GetDefaultAvatar(input.gender),
             gender: input.gender,
+            star: constants.STAR_SIGNUP_BONUS,
             total_game_count: 0,
             total_win_count: 0,
             today_game_count: 0,

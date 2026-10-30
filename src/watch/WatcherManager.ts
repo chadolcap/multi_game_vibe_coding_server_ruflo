@@ -10,6 +10,8 @@ import * as constants from "../common/constants.js";
 import * as messages from "../common/messages.js";
 import * as types from "../common/types.js";
 import type {
+    AdminAdLogQuery,
+    AdminAdLogResultPayload,
     AdminChannelCountPayload,
     AdminChannelCountQuery,
     AdminChannelUserQuery,
@@ -19,6 +21,8 @@ import type {
     NoticeTimeRange,
     SendNoticePayload,
 } from "../common/types.js";
+import * as adRepository from "../db/adRepository.js";
+import * as adLog from "../db/queries/adLog.js";
 import * as channelUsers from "../db/channelUsers.js";
 import * as noticePubSub from "../db/noticePubSub.js";
 
@@ -270,6 +274,21 @@ export class WatcherManager {
                 SendOnce();
             }, constants.NOTICE_REPEAT_INTERVAL_SEC * 1000);
         }, delay_to_start_ms);
+    }
+
+    // ADMIN_AD_LOG — date("YYYY-MM-DD") 하루의 광고 로그 요약 + 최신순 목록. 형식이 틀리면 조용히 무시한다
+    // (다른 관리자 조회와 같은 처리). DB 오류도 응답 없이 서버 로그만 남긴다.
+    public async HandleAdLog(client: Client, message: AdminAdLogQuery): Promise<void> {
+        if (!this.RequireLoggedIn(client)) return;
+        if (!adLog.IsValidAdLogDate(message?.date)) return;
+
+        try {
+            const day = await adRepository.FetchAdLogByDate(message.date);
+            const payload: AdminAdLogResultPayload = { date: message.date, ...day };
+            messages.SendMessage(this.room, client, types.MessageType.ADMIN_AD_LOG, payload);
+        } catch (error) {
+            console.error("[WatcherManager] 광고 로그 조회 실패:", error instanceof Error ? error.message : error);
+        }
     }
 
     public HandleLeave(client: Client): void {

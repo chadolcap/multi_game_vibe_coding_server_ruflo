@@ -8,7 +8,7 @@ import * as constants from "../common/constants.js";
 import * as log from "../common/log.js";
 import * as messages from "../common/messages.js";
 import * as types from "../common/types.js";
-import type { AdminChannelCountQuery, AdminChannelUserQuery, AdminLoginPayload, SendNoticePayload } from "../common/types.js";
+import type { AdminAdLogQuery, AdminChannelCountQuery, AdminChannelUserQuery, AdminLoginPayload, SendNoticePayload } from "../common/types.js";
 import { WatcherManager, type WatcherAuth } from "./WatcherManager.js";
 
 // Colyseus 가 AuthContext.ip 를 채울 때 소켓 주소보다 먼저 보는 프록시 헤더들
@@ -41,6 +41,10 @@ export class WatcherRoom extends Room {
 
         log.RegisterLoggedMessage<SendNoticePayload>(this, types.MessageType.SEND_NOTICE, async (client, message) => {
             await this.manager.HandleSendNotice(client, message);
+        });
+
+        log.RegisterLoggedMessage<AdminAdLogQuery>(this, types.MessageType.ADMIN_AD_LOG, async (client, message) => {
+            await this.manager.HandleAdLog(client, message);
         });
     }
 

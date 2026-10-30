@@ -94,7 +94,7 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 | `npm run pm2:start` | 운영 규모 전체 (게임 채널 상수를 먼저 올려야 함) |
 | `npm run pm2:status` / `pm2:logs` / `pm2:stop` / `pm2:restart` | 상태 / 로그 / graceful 정지 / 재시작 |
 | `npm run db:init` | DB 생성 + 스키마 + 이번 달 로그 테이블 (여러 번 실행해도 안전) |
-| `npm test` | 단위 테스트 (211개) |
+| `npm test` | 단위 테스트 (213개) |
 
 - PM2 설정은 `ecosystem.config.cjs` 입니다. PM2 가 `require()` 로 읽기 때문에 `.cjs` 여야 합니다.
 - `kill_timeout` 은 **12분**입니다. 게임 채널의 드레인(최대 10분)보다 짧으면 무중단 재시작이 무의미해집니다.
@@ -121,6 +121,9 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 | 문서·`scripts/check-*.mjs`·테스트만 | 재실행 없음 |
 
 - 검증 스크립트를 돌리려고 서버를 띄웠다면, 끝난 뒤 **내리지 않고 최신 빌드로 떠 있는 상태로 둡니다**.
+- 클라이언트가 반영해야 할 변경(프로토콜·흐름·UI)이 있으면 서버 작업을 끝낸 뒤 **`docs/HANDOFF.md` 를 갱신**합니다(사용자 요청).
+  - **클라이언트가 할 일 위주**: 화면·흐름별 체크리스트를 앞에, 바뀐 메시지 payload 는 참고용으로 뒤에. 서버 내부 구현은 적지 않음
+  - 최종 내용만: 같은 기능은 기존 항목을 덮어쓰고, 클라이언트가 끝냈다고 확인된 항목은 지움
 - ⚠️ 게임 채널 재시작은 SIGINT 드레인(8-2)이라 **진행 중인 게임이 있으면 끝날 때까지(최대 10분) 기다립니다.** 사용자가 클라이언트로 게임 중인지 `~/.pm2/logs/<채널>-out.log` 로 먼저 확인하세요.
 
 ---
@@ -440,8 +443,9 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 | type | 방향 | payload | 비고 |
 |---|---|---|---|
 | ENTER_LOBBY | C→S | `{partner, mid, gender(F/M), phone}` | 접속 후 10초 안에 안 오면 `ERROR{ENTER_TIMEOUT}` + 종료 |
-| ENTER_LOBBY | S→C | 성공 `{result:"Y", userid, new:"Y/N", name, avatar}` · 실패 `{result:"N", error}` | `new:"Y"` + 빈 name → 별명 화면 |
+| ENTER_LOBBY | S→C | 성공 `{result:"Y", userid, new:"Y/N", name, avatar, star🔸}` · 실패 `{result:"N", error}` | `new:"Y"` + 빈 name → 별명 화면. `star` = 보유 star |
 | NAME | C→S / S→C | `{name}` / `{result, error?}` | 이미 별명이 있어도 갱신 🔸 |
+| AD_VIEW_COMPLETE 🔸 | C→S / S→C | `{}` / 성공 `{result:"Y", star_add, star}` · 실패 `{result:"N", error, star}` | 로비에서 광고를 끝까지 본 뒤. ENTER_LOBBY 전이면 무시 |
 | PLAY_INFO | C→S / S→C | `{game?}` / `{result:"Y", game, total_game_count, total_win_count, today_game_count, today_win_count}` | 그 게임의 통계 |
 | RANK_DAILY | C→S / S→C | `{game?}` / `{game, date, list:[[name,score]…], my:{rank,score}}` | 100명, 동점 공동 순위, 기록 없어도 `my` 옴 |
 | RANK_WEEKLY | C→S / S→C | `{game?}` / `{game, term:{start,end}, list, my}` | 월~일 |
@@ -456,6 +460,14 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 |---|---|---|---|---|
 | ENTER_LOBBY | 형식 오류 | 중복 접속 | DB/Redis 오류 | 기타(인원 초과 등) |
 | NAME | 사용 중인 별명 | 부적절한 별명(형식·금칙어) | 서버 오류 🔸 | - |
+| AD_VIEW_COMPLETE 🔸 | 10초 안에 다시 보냄 | 서버 오류 | - | - |
+
+**star · 광고 보상**
+
+- 보유 star 는 `user_member_info.star` 입니다. 가입 시 **5**(`STAR_SIGNUP_BONUS`), 광고 1회마다 **+1**(`AD_VIEW_REWARD_STAR`). 아직 쓰는 곳은 없습니다.
+- 하루 횟수 제한은 없고(사용자 결정), 같은 유저는 **10초 간격**(`AD_VIEW_COOLDOWN_SEC`, Redis `ad_cooldown:{userid}` SET NX) 안에 다시 받을 수 없습니다. 클라이언트 신호만 믿는 구조라 재전송으로 무한 지급되는 것만 막습니다.
+- 지급·거부 모두 `ad_log_YYYY_MM` 에 남깁니다. 지급하면 Redis 유저 캐시도 갱신합니다(`db/adRepository.ts`).
+- star 가 없는 옛 캐시(컬럼 추가 전 저장분)는 캐시 미스로 취급해 DB 를 다시 읽습니다.
 
 ### 7-3. 게임방 공통
 
@@ -536,6 +548,7 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 | ADMIN_CHANNEL_COUNT | C→S / S→C | `{game?}` / `{game, count:{lobby_1:20, rps_1:199 …}}` | 실시간 집계 |
 | ADMIN_CHANNEL_USER | C→S / S→C | `{game?, channel:"rps_1"}` / `{game, channel, user:[{userid, room?}], total}` | 최대 5초 지난 스냅샷. 옛 숫자 형식은 폐지 |
 | SEND_NOTICE | C→S | `{game?, channel:[…], message, time?:{mon,day,start,end}}` | 지정한 채널에만. `time` 이 있으면 구간 동안 1분마다 반복 |
+| ADMIN_AD_LOG 🔸 | C→S / S→C | `{date:"YYYY-MM-DD"}` / `{date, summary:{view_count, user_count, star_total, reject_count}, list:[{time, userid, result, star_add, star, channel}], total}` | 그날 광고 로그. `list` 최신순 최대 500건(`total` 이 더 크면 잘림), `summary` 는 전체 기준. 틀린 날짜는 무시, 로그 없는 달은 빈 결과. C↔S 로그 생략(통계) |
 
 ---
 
@@ -628,6 +641,7 @@ erDiagram
         varchar name "NULL=미등록, UNIQUE"
         varchar avatar
         varchar phone "개인정보"
+        int star "보유 star, 기본 5"
     }
     rps_user_play_info {
         int total_game_count
@@ -648,11 +662,12 @@ erDiagram
 | `othello_game_log_YYYY_MM` | 위와 같고 `vs`=돌 수(`"45:19"`), `score`=20/0, `plays`=`[{userid,x,y}…]`, `is_draw` 추가 |
 | `stepping_game_log_YYYY_MM` | 오델로와 같고 `map` 추가, `vs`=게임 점수(`"30:15"`), `plays`=`[{userid,count,x,y,save}…]`(받아들인 MOVE_INFO 만) |
 | `airhockey_game_log_YYYY_MM` | 오델로와 같은 컬럼, `vs`=골 수(`"3:1"`), `score`=승자 골×5, `plays`=골 기록 `[{userid,sec}…]`(퍽 좌표는 안 남김) |
+| `ad_log_YYYY_MM` | 광고 시청 로그. `log_time, userid, result`(Y 지급/N 거부), `star_add, star_after, channel`(로비 room_name). 요청 문서의 대문자 `AD_LOG_…` 대신 다른 테이블처럼 소문자(Windows MariaDB 가 소문자로 저장) |
 | `flag_game_log_YYYY_MM` | 1인이라 `win/lose/vs/is_draw` 대신 `userid, score, correct_count, quest_count`(판정한 문제 수), `plays`=`[{quest,say,answer,result}…]`(`answer` 의 null = 안 누름), `is_quit`(게임 중 나감) |
 
 - RPS `plays` 는 `[{ "userid1": "가위", "userid2": "보" }, …]` 이고 무승부 판도 포함합니다(2026-10-02 이전 로그는 옛 형식).
 - 오델로 무승부는 `win`/`lose` 에 player1/player2 를 넣고 `is_draw=1` 로 구분합니다.
-- ⚠️ **컬럼 변경은** `db:init` **이 반영하지 않습니다**(`CREATE TABLE IF NOT EXISTS`). 기존 테이블은 따로 `ALTER` 해야 합니다.
+- ⚠️ **컬럼 변경은** `db:init` **이 반영하지 않습니다**(`CREATE TABLE IF NOT EXISTS`). 기존 테이블은 따로 `ALTER` 해야 합니다. 예외: `user_member_info.star` 는 `initDb.ts` `EnsureUserStarColumn` 이 없으면 추가합니다.
 - ⚠️ FK/인덱스 **제약 이름은 DB 전역에서 유일**해야 합니다. 게임을 복제할 때 반드시 바꾸세요.
 - ⚠️ `IF(...)` 같은 식으로 만든 컬럼은 mysql2 가 **문자열**로 돌려줍니다. `CAST(... AS UNSIGNED)` 로 감싸세요.
 - 다른 환경에서 `db:init` 을 하기 전에는 기존 테이블 구조부터 확인하세요.
@@ -672,6 +687,7 @@ erDiagram
 | `check-stepping-game.mjs` | 매칭 → 맵 → MOVE_INFO 검증(무시 3종) → 4번째 추락 종료 → 결과 3초 대기 → 재게임 + 퇴장 → 60초 종료 → OUT_USER → DB | 34/34 (수정 전 빌드에서 3초 대기 2건 실패 확인) |
 | `check-airhockey-game.mjs` | 매칭 → `SERVE_SELECT`(양쪽 같은 값) 5초 → `GAME_START` → 좌표 뒤집기·중앙선 자르기 → `ONE_START.serve`·서브 쪽 퍽 → 서브 안 하고 10초 → 서브권 상대에게 → 또 10초 → 다시 돌아옴(점수 없음) → 판의 첫 LEVER_MOVE 가 끌려오지 않고 바로 놓임 → 서버가 슛·골(양쪽 궤적 반대) → 골 연출 중 끊김·재접속 `GAME_STATUS`(server 포함) → 매 판 탁구 서브 순서 확인, 서버가 골 → 첫 서버 3:2 → 결과 3초 → 재게임 첫 서브 교대 + 퇴장(A 서브 판은 살짝 넘겨 주고 봇이 3골) → OUT_USER → 재게임 무응답 10초 → RETURN_TO_LOBBY → DB. **첫 서브가 랜덤이라 승자·DB 기댓값은 SERVE_SELECT 로 계산**(약 80초). 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리는 돈다. `MODE=invalid` = 첫 서버 서브 안 함 → 10초 뒤 서브권 넘김(횟수 안 셈) → 넘겨받은 유저가 판마다 살살 서브 후 방치 → 같은 서버로 정체 재시작 3번 → 4번째 정체에서 즉시 `GAME_RESULT{draw:"Y"}`(GAME_INVALID 없음) → A `N` 즉시 / B 무응답 10초 로비, activeGame·DB 기록 없음(약 90초) | 72/72, invalid 28/28 (서브 제한 반영 2026-10-29. 그 전 71/71 은 A·B 첫 서브 각각 2회 이상 확인, 봇을 끈 빌드에서 8건, clock 수정 전 빌드에서 무응답 1건, 고정 스텝 수정 전 빌드에서 정체 2건 실패 확인) |
 | `check-flag-game.mjs` | 즉시 MATCH_FOUND(opponent 없음) → ENTER_ROOM player1 만 → 대표 정답 즉시 Y(뒤에 보낸 답 무시) / 반대 방향 정답(내리지마→올림) / 깃발 둘 중 하나만 보냄 또는 틀린 방향 즉시 N / 무응답 5초 N(answer null) → 결과 3초 → 재게임 만점 → 무응답 10초 RETURN_TO_LOBBY → 게임 중 LEAVE·소켓 끊김 각각 현재 점수 저장 + 방 제거 + REJOIN_GAME 없음 → DB 4행·정답 누적·랭킹 → 모든 `QUEST_SHOW.say` 가 quest 와 맞는지. 1인이라 실제 클라이언트와 매칭이 섞이지 않음(약 100초) | 30/30 |
+| `check-ad-view.mjs` | ENTER_LOBBY 전 무시 → 신규 star 5 → AD_VIEW_COMPLETE Y(6) → 바로 다시 N(error 1) → DB star·`ad_log` Y·N 두 줄·Redis 캐시 → 재접속 star 6 → ADMIN_AD_LOG 오늘 요약·목록 / 없는 달 빈 결과 / 틀린 날짜 무시. JOIN_MATCH 안 보냄(약 5초) | 14/14 |
 | `check-admin-login.mjs` / `check-send-notice.mjs` / `check-enter-lobby.mjs` | 관리자 보안 / 공지 필터 / 로비 payload | 통과 |
 
 **쓸 때 지킬 것**
@@ -756,4 +772,5 @@ erDiagram
 | 에어하키 클라이언트 (사용자 작업) | ① `PUCK_MOVE` 를 `loc + vel×경과초` 로 예측해 그리기(안 하면 30Hz 로 뚝뚝 끊김) ② `GAME_RESULT.draw` 로 결과 화면 분기(`"Y"` = 무승부·무효) ③ `LEVER_MOVE` 를 손가락 위치로 계속 보내기(판의 첫 입력이 시작 위치). **보내는 값은 손가락 위치 그대로**, 내 레버를 **그릴 때만** 서버와 같은 무게 공식(τ=0.05, 손=손가락, 0.5 이내면 딱 맞춤, 판의 첫 입력은 바로 놓기)을 적용. 상대 레버는 다시 늦추지 않음 ④ 테이블·퍽·레버 크기를 서버 값과 일치 — 신고 화면에서 퍽이 테두리 밖에 그려져 크기/비율 차이가 의심됨 |
 | 청기백기 클라이언트 (사용자 작업) | `game:"flag"` 매칭, 상단 문제 판넬·가운데 오리·손마다 올림/정지/내림 버튼 UI, `QUEST_SHOW` 송수신(`say` 로 문장 만들기, `quest` 로 정답 포즈 이미지 9장 중 선택, 문제에 나온 깃발 수만큼 눌리면 **한 번에** 전송), `MATCH_FOUND.opponent`/`ENTER_ROOM.player2` 없는 경우 처리. 시트 flag 탭 H열(빨간 글씨)이 서버 기준 |
 | 에어하키 서브 클라이언트 (사용자 작업, 2026-10-29) | `SERVE_SELECT{userid}` 받으면 동전 던지기 연출 + 동전에 그 유저 이름(`ENTER_ROOM` 의 player 이름) 표시, 5초 뒤 `GAME_START`. `ONE_START.serve` 로 서브 표시, 퍽은 서버 쪽 `(0,∓200)` 에서 시작(첫 `PUCK_MOVE` 로 옴). 재접속은 `GAME_STATUS.server`. **서브 10초 초과 시 `ONE_START{serve:상대}` 가 다시 옴**(ONE_RESULT 없음) — 같은 판 다시 시작으로 처리, 필요하면 서브 제한 카운트다운 표시 |
+| star · 광고 클라이언트 (사용자 작업) | `docs/HANDOFF.md` — 로비 star 표시 + 광고 보기 버튼, 게임 종료 후 광고 → 로비, 관리자 페이지 광고 로그 화면 |
 | 엑셀 시트 반영 (사용자 작업) | 에어하키: 서브 10초 제한·서브권 넘김(점수 없음, 무효 횟수 안 셈), `PUCK_MOVE` 비고 "퍽의 처음 위치는 중앙선" → 서브 쪽 200, 재게임 첫 서브 교대. `GAME_RESULT.draw` 항상 Y/N(정체 무효 = draw:Y), 판 시작 레버 규칙, 퍽 정체 10초 재시작, `PUCK_MOVE.vel`, `GAME_START` 비고(맵 없음), `GAME_STATUS.win_count0/1`, `GAME_RESULT.score`=골×5·`draw` 조건, 좌표계·테이블 크기. 점핑: 제한 시간 20초→60초, `MAP_SEELCT`→`MAP_SELECT`, `MOVE_INFO.life`, `GAME_STATUS` 새 모양, `GAME_RESULT.score/life`, 라이프·점수 규칙. 기존: `TURN_START.can`, `GAME_RESULT.draw`, 오델로 `win_count`=돌 수, `OUT_USER` 지연 전송, 자동 턴 2초, `GAME_STATUS` turn/can 생략 |

@@ -92,3 +92,11 @@ export const DEFAULT_AVATAR_BY_GENDER: Record<(typeof ALLOWED_GENDERS)[number], 
     M: "a_m_0",
     F: "a_f_0",
 };
+
+// ── star / 광고 ──
+export const STAR_SIGNUP_BONUS = 5;             // 가입 시 기본 지급 star (user_member_info.star DEFAULT 와 같은 값)
+export const AD_VIEW_REWARD_STAR = 1;           // AD_VIEW_COMPLETE 1회당 지급 star
+// 같은 유저의 AD_VIEW_COMPLETE 최소 간격. 하루 횟수 제한은 없고(사용자 결정), 이 간격 안에 다시 오면 거부한다
+// (클라이언트 신호만 믿는 구조라 연타·재전송으로 star 를 무한히 얻는 것만 막는다). Redis 키라 로비 채널이 달라도 적용된다.
+export const AD_VIEW_COOLDOWN_SEC = 10;
+export const ADMIN_AD_LOG_LIST_LIMIT = 500;     // ADMIN_AD_LOG 상세 목록 최대 건수 (요약은 전체 기준)

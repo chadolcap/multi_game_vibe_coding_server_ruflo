@@ -49,6 +49,9 @@ export const MessageType = {
     // C→S 요청(payload 없음) / S→C 같은 type 재사용, { term:{start,end}, list:[[name,score],...], my:{rank,score} }
     // — 주간 랭킹. 2026-10-01 통신규약 시트에 추가됨(문서 기준).
     RANK_WEEKLY: "RANK_WEEKLY",
+    // C→S {} — 로비에서 광고를 끝까지 본 뒤 보낸다 / S→C 같은 type 재사용,
+    // { result:"Y", star_add, star } 또는 { result:"N", error, star } (AdViewCompleteResultPayload)
+    AD_VIEW_COMPLETE: "AD_VIEW_COMPLETE",
     JOIN_MATCH: "JOIN_MATCH",             // C→S { select: "Y"|"N" } — Y: 게임 참여(매칭 대기열 등록), N: 매칭 대기 취소
                                            // (CANCEL_MATCH 는 더 이상 안 쓴다 — JOIN_MATCH 로 통합됨, 문서 반영)
     MATCH_FOUND: "MATCH_FOUND",           // S→C
@@ -119,6 +122,8 @@ export const MessageType = {
     // S→C { message } — 그 채널들에 붙어 있는 유저에게 **같은 type 을 재사용**해 전송한다(문서 기준,
     // ENTER_LOBBY/NAME 등과 같은 "요청·응답 type 재사용" 관례). 예전엔 별도 이름 NOTICE 였는데 폐지.
     SEND_NOTICE: "SEND_NOTICE",
+    // C→S { date:"YYYY-MM-DD" } / S→C 같은 type 재사용, 그날 광고 로그 요약 + 목록 (AdminAdLogResultPayload)
+    ADMIN_AD_LOG: "ADMIN_AD_LOG",
 } as const;
 export type MessageType = typeof MessageType[keyof typeof MessageType];
 
@@ -171,6 +176,22 @@ export interface EnterLobbyResultPayload {
     new?: "Y" | "N"; // 새로운 유저 여부
     name?: string;   // 별명. 신규 유저는 빈 문자열 — 클라이언트가 NAME 으로 등록을 받아야 한다
     avatar?: string;
+    star?: number;   // 보유 star. 신규 유저는 가입 보너스(STAR_SIGNUP_BONUS)
+}
+
+// AD_VIEW_COMPLETE 결과 코드 (S→C, result:"N" 일 때만)
+export const AdViewErrorCode = {
+    TOO_FREQUENT: 1,  // 직전 광고 보상 뒤 AD_VIEW_COOLDOWN_SEC 가 안 지남 — 재전송·연타
+    SERVER_ERROR: 2,  // DB/Redis 오류
+} as const;
+export type AdViewErrorCode = typeof AdViewErrorCode[keyof typeof AdViewErrorCode];
+
+// AD_VIEW_COMPLETE 결과 응답 (S→C, 요청과 같은 type 재사용). star 는 성공·실패 모두 지금 보유량이다.
+export interface AdViewCompleteResultPayload {
+    result: "Y" | "N";
+    error?: AdViewErrorCode;
+    star_add?: number; // 이번에 받은 star (성공일 때만)
+    star: number;
 }
 
 // NAME 으로 클라이언트가 보내는 값 (별명 등록 요청)
@@ -260,6 +281,7 @@ export interface UserInfo {
     name: string;
     avatar: string;
     gender: string;
+    star: number; // 보유 star (user_member_info.star). 광고 시청(AD_VIEW_COMPLETE)으로 늘어난다
     total_game_count: number;
     total_win_count: number;
     today_game_count: number;
@@ -454,4 +476,32 @@ export interface SendNoticePayload {
     channel: string[];
     message: string;
     time?: NoticeTimeRange;
+}
+
+// ADMIN_AD_LOG 로 관리자 페이지가 보내는 값. date 는 "YYYY-MM-DD"(서버 로컬 날짜, KST).
+export interface AdminAdLogQuery {
+    date: string;
+}
+
+// ADMIN_AD_LOG 결과 응답 (S→C, type 재사용). list 는 최신순 최대 ADMIN_AD_LOG_LIST_LIMIT 건이고,
+// total 이 list 길이보다 크면 잘린 것이다. summary 는 잘림과 상관없이 그날 전체 기준이다.
+export interface AdminAdLogResultPayload {
+    date: string;
+    summary: {
+        view_count: number;   // 지급된 시청 수
+        user_count: number;   // 지급받은 유저 수 (중복 제외)
+        star_total: number;   // 지급한 star 합계
+        reject_count: number; // 거부된 요청 수
+    };
+    list: AdminAdLogEntry[];
+    total: number;
+}
+
+export interface AdminAdLogEntry {
+    time: string;       // "HH:MM:SS"
+    userid: string;
+    result: "Y" | "N";
+    star_add: number;
+    star: number;       // 처리 뒤 보유 star
+    channel: string;    // 요청이 들어온 로비 (lobby_1 …)
 }

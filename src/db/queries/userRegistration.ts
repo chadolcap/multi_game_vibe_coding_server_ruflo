@@ -6,6 +6,7 @@
 // 되어 로그인이 깨진다. 게임을 추가하면 아래 GAME_PLAY_INFO_TABLES 에 테이블 이름을 한 줄 더한다.
 
 import type { Pool } from "mysql2/promise";
+import * as constants from "../../common/constants.js";
 import * as userid from "../../common/userid.js";
 import type { NewUserInput } from "../types.js";
 
@@ -32,9 +33,10 @@ export async function RegisterNewUser(pool: Pool, input: NewUserInput): Promise<
             [input.userid, input.partner, input.mid, input.gender]
         );
         // 아바타는 성별 기본값으로 정한다 (M → a_m_0, F → a_f_0). 나중에 유저가 직접 바꿀 수 있다.
+        // star 는 가입 보너스(STAR_SIGNUP_BONUS)로 시작한다
         await connection.query(
-            "INSERT IGNORE INTO user_member_info (userid, avatar, phone) VALUES (?, ?, ?)",
-            [input.userid, userid.GetDefaultAvatar(input.gender), input.phone]
+            "INSERT IGNORE INTO user_member_info (userid, avatar, phone, star) VALUES (?, ?, ?, ?)",
+            [input.userid, userid.GetDefaultAvatar(input.gender), input.phone, constants.STAR_SIGNUP_BONUS]
         );
         for (const table of GAME_PLAY_INFO_TABLES) {
             // 테이블 이름은 위 상수 배열의 값만 들어오므로 SQL Injection 위험이 없다 (외부 입력 아님)
@@ -90,4 +92,14 @@ export async function TrySetUserName(pool: Pool, userid: string, name: string): 
         if ((error as { code?: string }).code === "ER_DUP_ENTRY") return "duplicate";
         throw error;
     }
+}
+
+// 광고 보상 등으로 star 를 더하고, 더한 뒤의 보유량을 돌려준다. 유저가 없으면 null.
+// 같은 유저의 요청은 AD_VIEW_COOLDOWN_SEC 로 막혀 동시에 오지 않으므로 UPDATE 뒤 SELECT 로 충분하다.
+export async function AddUserStar(pool: Pool, userid: string, amount: number): Promise<number | null> {
+    const [result] = await pool.query("UPDATE user_member_info SET star = star + ? WHERE userid = ?", [amount, userid]);
+    if ((result as { affectedRows: number }).affectedRows === 0) return null;
+    const [rows] = await pool.query("SELECT star FROM user_member_info WHERE userid = ?", [userid]);
+    const row = (rows as { star: number }[])[0];
+    return row ? row.star : null;
 }

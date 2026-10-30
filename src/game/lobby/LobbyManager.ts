@@ -14,6 +14,7 @@ import * as messages from "../../common/messages.js";
 import * as nameFilter from "../../common/nameFilter.js";
 import * as types from "../../common/types.js";
 import type {
+    AdViewCompleteResultPayload,
     EnterLobbyPayload,
     EnterLobbyResultPayload,
     JoinMatchPayload,
@@ -32,6 +33,7 @@ import type {
 // 관례(파일명 그대로)를 따르지 않고 "useridUtils" 로 바꿔서 섀도잉(가려짐)을 피한다.
 import * as useridUtils from "../../common/userid.js";
 import * as userRepository from "../../db/userRepository.js";
+import * as adRepository from "../../db/adRepository.js";
 import * as userCache from "../../db/userCache.js";
 import * as playInfoRepository from "../../db/playInfoRepository.js";
 import * as rankingRepository from "../../db/rankingRepository.js";
@@ -158,6 +160,7 @@ export class LobbyManager {
             new: result.is_new_user ? "Y" : "N",
             name: result.user.name,
             avatar: result.user.avatar,
+            star: result.user.star,
         };
         messages.SendMessage(this.room, client, types.MessageType.ENTER_LOBBY, entered_payload);
 
@@ -251,6 +254,32 @@ export class LobbyManager {
 
         entry.user = { ...entry.user, name: trimmed_name };
         messages.SendResult(this.room, client, types.MessageType.NAME, "Y");
+    }
+
+    // AD_VIEW_COMPLETE 처리 — 로비에서 광고를 끝까지 본 클라이언트가 보낸다. star 를 지급하고(간격 제한
+    // AD_VIEW_COOLDOWN_SEC, 하루 횟수 제한 없음) 결과와 보유 star 를 같은 type 으로 응답한다.
+    // ENTER_LOBBY 전이거나 이미 매칭돼 대기열에서 빠진 연결이면 조용히 무시한다(로그도 남기지 않음).
+    public async HandleAdViewComplete(client: Client): Promise<void> {
+        const userid = this.userid_by_session.get(client.sessionId);
+        if (!userid) return;
+
+        const entry = this.waiting_by_userid.get(userid);
+        if (!entry) return;
+
+        const reward = await adRepository.RewardAdView(userid, this.room.roomName, entry.user.star);
+        const payload: AdViewCompleteResultPayload = reward.ok
+            ? { result: "Y", star_add: reward.star_add, star: reward.star }
+            : {
+                  result: "N",
+                  error: reward.reason === "too_frequent" ? types.AdViewErrorCode.TOO_FREQUENT : types.AdViewErrorCode.SERVER_ERROR,
+                  star: reward.star,
+              };
+        if (reward.ok) {
+            entry.user = { ...entry.user, star: reward.star };
+        }
+        // await 사이에 연결이 끊겼으면 보내지 않는다 (star 는 이미 DB 에 반영됨 — 다음 ENTER_LOBBY 에서 보임)
+        if (this.userid_by_session.get(client.sessionId) !== userid) return;
+        messages.SendMessage(this.room, client, types.MessageType.AD_VIEW_COMPLETE, payload);
     }
 
     // PLAY_INFO 처리 (게임 정보 통신). 이 세션이 ENTER_LOBBY 때 이미 들고 있는 UserInfo 를 그대로

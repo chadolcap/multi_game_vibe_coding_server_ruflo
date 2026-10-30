@@ -1,5 +1,5 @@
 // 로비 룸 — 소켓 이벤트를 받아 LobbyManager 에 위임한다.
-// 실제 로비 콘텐츠(구매, 광고 보기 등)는 나중에 이 파일에 추가한다 (지금은 ENTER_LOBBY 처리만).
+// 실제 로비 콘텐츠(구매 등)는 나중에 이 파일에 추가한다. 광고 보기 보상은 AD_VIEW_COMPLETE 로 처리한다.
 
 import { Room, CloseCode, type Client } from "@colyseus/core";
 import type { Delayed } from "@colyseus/timer";
@@ -62,6 +62,10 @@ export class LobbyRoom extends Room {
 
         log.RegisterLoggedMessage<RankPayload>(this, types.MessageType.RANK_WEEKLY, async (client, message) => {
             await this.manager.HandleRankWeekly(client, message);
+        });
+
+        log.RegisterLoggedMessage(this, types.MessageType.AD_VIEW_COMPLETE, async (client) => {
+            await this.manager.HandleAdViewComplete(client);
         });
 
         log.RegisterLoggedMessage<JoinMatchPayload>(this, types.MessageType.JOIN_MATCH, async (client, message) => {

@@ -11,6 +11,7 @@ interface UserInfoRow extends RowDataPacket {
     name: string | null; // 별명을 아직 등록하지 않은 유저는 NULL (schema.sql 참고)
     avatar: string;
     phone: string;
+    star: number;
     total_game_count: number;
     total_win_count: number;
     today_game_count: number;
@@ -31,6 +32,7 @@ const SELECT_USER_INFO_SQL = `
         m.name,
         m.avatar,
         m.phone,
+        m.star,
         g.total_game_count,
         g.total_win_count,
         CAST(IF(g.today_date = CURDATE(), g.today_game_count, 0) AS UNSIGNED) as today_game_count,
@@ -53,6 +55,7 @@ export async function FetchUserInfo(pool: Pool, userid: string): Promise<DbUserI
         name: row.name ?? "", // 앱 계층에서는 "별명 없음" 을 빈 문자열로 다룬다 (DB 는 UNIQUE 제약 때문에 NULL 사용)
         avatar: row.avatar,
         phone: row.phone,
+        star: row.star,
         total_game_count: row.total_game_count,
         total_win_count: row.total_win_count,
         today_game_count: row.today_game_count,

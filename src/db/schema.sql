@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS user_member_info (
     name                VARCHAR(50)  NULL DEFAULT NULL,
     avatar              VARCHAR(255) NOT NULL DEFAULT '',   -- 새 유저는 빈 값
     phone               VARCHAR(100) NOT NULL,
-    join_date           DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    star                INT UNSIGNED NOT NULL DEFAULT 5,    -- 보유 star. 가입 시 5(constants.STAR_SIGNUP_BONUS), 광고 시청으로 증가.
+                                                            -- 기존 DB 는 initDb.ts EnsureUserStarColumn 이 ALTER 로 추가한다
+    join_date          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     login_date          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     certification_date  DATETIME     NULL,
     terms_date          DATETIME     NULL,

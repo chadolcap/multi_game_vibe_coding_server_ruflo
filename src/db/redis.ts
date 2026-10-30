@@ -36,3 +36,9 @@ export async function Touch(key: string, ttl_sec: number): Promise<boolean> {
     const result = await GetRedisClient().expire(key, ttl_sec);
     return result === 1;
 }
+
+// 키가 없을 때만 TTL 과 함께 저장한다 (SET NX EX). 저장했으면 true, 이미 있었으면 false — 간격 제한용
+export async function SetIfAbsent(key: string, ttl_sec: number): Promise<boolean> {
+    const result = await GetRedisClient().set(key, "1", "EX", ttl_sec, "NX");
+    return result === "OK";
+}

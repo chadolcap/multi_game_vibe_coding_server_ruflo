@@ -8,6 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import mysql from "mysql2/promise";
 import { config } from "../common/config.js";
+import * as constants from "../common/constants.js";
+import * as adLogSchema from "./adLogSchema.js";
 import * as airhockeyGameLogSchema from "./airhockeyGameLogSchema.js";
 import * as flagGameLogSchema from "./flagGameLogSchema.js";
 import * as othelloGameLogSchema from "./othelloGameLogSchema.js";
@@ -91,6 +93,27 @@ async function EnsureCurrentMonthGameLogs(): Promise<void> {
 
     const flag_table = await flagGameLogSchema.EnsureFlagGameLogTable(pool, now);
     console.log(`[db:init] 이번 달 청기백기 게임 로그 테이블 확인/생성 완료: ${flag_table}`);
+
+    const ad_table = await adLogSchema.EnsureAdLogTable(pool, now);
+    console.log(`[db:init] 이번 달 광고 로그 테이블 확인/생성 완료: ${ad_table}`);
+}
+
+// user_member_info.star 는 기존 테이블에 나중에 추가된 컬럼이라 CREATE TABLE IF NOT EXISTS 로는 안 생긴다 —
+// 없으면 ALTER 로 붙인다. 기존 유저도 가입 보너스(STAR_SIGNUP_BONUS)로 시작한다(DEFAULT 값).
+async function EnsureUserStarColumn(): Promise<void> {
+    const { GetDbPool } = await import("./connection.js");
+    const pool = GetDbPool();
+    const [rows] = await pool.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'user_member_info' AND COLUMN_NAME = 'star'`,
+        [config.db_name]
+    );
+    if (Number((rows as { cnt: number }[])[0].cnt) > 0) return;
+
+    await pool.query(
+        `ALTER TABLE user_member_info ADD COLUMN star INT UNSIGNED NOT NULL DEFAULT ${constants.STAR_SIGNUP_BONUS} AFTER phone`
+    );
+    console.log("[db:init] user_member_info.star 컬럼 추가 완료");
 }
 
 // 게임이 추가되기 전에 가입한 유저에게 그 게임의 통계 행을 채워 넣는다.
@@ -106,6 +129,7 @@ async function BackfillPlayInfo(): Promise<void> {
 async function Main(): Promise<void> {
     await EnsureDatabaseExists();
     await ApplySchema();
+    await EnsureUserStarColumn();
     await EnsureCurrentMonthGameLogs();
     await BackfillPlayInfo();
     console.log("[db:init] 완료");
