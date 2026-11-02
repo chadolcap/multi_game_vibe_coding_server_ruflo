@@ -388,6 +388,7 @@ async function Main() {
     checker.Check("승자 = 첫 서버: win_count 3, score 15", result1?.winner?.userid === winner1 && result1?.winner?.win_count === 3 && result1?.winner?.score === 15, JSON.stringify(result1?.winner));
     checker.Check("패자: win_count 2, score 10 (패자도 골 × 5)", result1?.loser?.userid === loser1 && result1?.loser?.win_count === 2 && result1?.loser?.score === 10, JSON.stringify(result1?.loser));
     checker.Check("draw:\"N\" — 무승부가 아니다 (draw 는 항상 온다)", result1?.draw === "N", String(result1?.draw));
+    checker.Check("star = 양쪽 4 (가입 5 - 게임 시작 1)", result1?.winner?.star === 4 && result1?.loser?.star === 4, `winner=${result1?.winner?.star} loser=${result1?.loser?.star}`);
     checker.Check("B 도 GAME_RESULT 를 받았다", (await WaitInLog(log_b, "GAME_RESULT", 2000, reconnect_i_b)) !== -1);
 
     // --- 7) 재게임 → B 퇴장 → 봇이 B 레버로 골 → GAME_RESULT → OUT_USER ---
@@ -515,6 +516,7 @@ async function CheckInvalidByStuck(game_a, game_b, log_a, log_b, start_i) {
             r?.draw === "Y" && r?.invalid === undefined && r?.winner?.userid === userid_a && r?.loser?.userid === userid_b &&
                 r?.winner?.win_count === 0 && r?.winner?.score === 0 && r?.loser?.score === 0, JSON.stringify(r));
         checker.Check(`${name}: GAME_INVALID 는 오지 않는다 (프로토콜 제거)`, !log.some((e) => e.type === "GAME_INVALID"));
+        checker.Check(`${name}: 무효 결과에도 star 4 (시작 때 쓴 star 는 돌려주지 않음)`, r?.winner?.star === 4 && r?.loser?.star === 4, `winner=${r?.winner?.star} loser=${r?.loser?.star}`);
         checker.Check(`${name}: 무효 직후 바로 로비로 보내지 않는다 (GAME_RESULT 전 RETURN_TO_LOBBY 없음)`, !log.slice(0, ri === -1 ? undefined : ri).some((e) => e.type === "RETURN_TO_LOBBY"));
         checker.Check(`${name}: ONE_RESULT 는 없다`, !log.some((e) => e.type === "ONE_RESULT"), userid);
     }

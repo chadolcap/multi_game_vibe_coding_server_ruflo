@@ -134,6 +134,7 @@ export type MessageType = typeof MessageType[keyof typeof MessageType];
 export const ErrorCode = {
     ENTER_TIMEOUT: "ENTER_TIMEOUT",           // 제한 시간 안에 ENTER_LOBBY 를 보내지 않음 → 연결 종료
     NO_GAME_ROOM: "NO_GAME_ROOM",             // 모든 게임 채널이 가득 참 → 연결 유지
+    NOT_ENOUGH_STAR: "NOT_ENOUGH_STAR",       // JOIN_MATCH 했는데 보유 star 부족 → 연결 유지
 } as const;
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
 

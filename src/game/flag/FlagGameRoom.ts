@@ -34,6 +34,7 @@ import type {
 } from "./flagTypes.js";
 import * as flagGameResultRepository from "../../db/flagGameResultRepository.js";
 import * as userCache from "../../db/userCache.js";
+import * as userRepository from "../../db/userRepository.js";
 
 function ToRoomPlayerInfo(user: UserInfo): RoomPlayerInfo {
     return {
@@ -187,6 +188,7 @@ export class FlagGameRoom extends Room {
 
     // GAME_START 를 보내고 첫 문제를 예약한다. 최초 시작(HandleReady)과 재게임(ResolveReplay) 둘 다 여기를 쓴다.
     private StartGame(): void {
+        this.SpendStarForGame();
         this.game_over = false;
         this.game_started_at = new Date();
         this.quest_no = 0;
@@ -198,6 +200,15 @@ export class FlagGameRoom extends Room {
 
         this.SendToPlayer(types.MessageType.GAME_START, {});
         this.ScheduleStep(() => this.StartQuest(), flagConstants.FLAG_GAME_START_DELAY_SEC);
+    }
+
+    // 게임 시작 비용을 뺀다. 메모리 값은 재게임 star 검사(ResolveReplay)에 쓰고, DB 저장은 기다리지 않는다.
+    private SpendStarForGame(): void {
+        if (!this.player) return;
+        this.player = { ...this.player, star: Math.max(0, this.player.star - constants.GAME_START_STAR_COST) };
+        userRepository.SpendGameStar(this.player.userid).catch((error) => {
+            console.error(`[FlagGameRoom] star 차감 실패 roomId=${this.roomId}:`, error instanceof Error ? error.message : error);
+        });
     }
 
     // ONE_START — 한 문제 시작. FLAG_QUEST_SHOW_DELAY_SEC 뒤 QUEST_SHOW 로 문제를 낸다.
@@ -289,6 +300,7 @@ export class FlagGameRoom extends Room {
                 score,
                 correct_count,
                 win_per: flagRules.ComputeWinPer(user.total_win_count + correct_count, user.total_game_count + 1),
+                star: user.star,
             };
             this.SendToPlayer(types.MessageType.GAME_RESULT, payload);
             this.StartReplayWait();
@@ -327,12 +339,13 @@ export class FlagGameRoom extends Room {
     }
 
     // 재게임이면 같은 방에서 GAME_START 부터 다시(READY 는 다시 안 받음), 아니면 로비로 보낸다.
+    // star 가 없으면 재게임을 골랐어도 로비로 보낸다 — 로비에서 광고로 충전한다.
     private ResolveReplay(replay: boolean): void {
         if (!this.replay_timeout) return; // 이미 처리됨 (타임아웃과 응답이 겹친 경우)
         this.replay_timeout.clear();
         this.replay_timeout = null;
 
-        if (replay) {
+        if (replay && this.player && this.player.star >= constants.GAME_START_STAR_COST) {
             this.StartGame();
             return;
         }

@@ -64,6 +64,7 @@ export interface AirhockeyGameResultPlayerInfo {
     win_count: number;
     score: number;
     win_per: number; // total_win_count 기준 승률 (0~100 정수)
+    star: number; // 남은 star — 0 이면 클라이언트가 재게임 대신 star 부족 팝업을 띄운다
 }
 
 // GAME_RESULT — 최종 결과. draw 는 **항상** 보낸다("Y"/"N") — 클라이언트는 draw 값으로 결과 화면을 고른다(사용자 결정 2026-10-15).

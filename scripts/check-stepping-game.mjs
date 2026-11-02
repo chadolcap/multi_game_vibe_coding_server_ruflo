@@ -198,6 +198,7 @@ async function Main() {
     checker.Check("B: win_count 2, life 2, score 30", result1?.winner?.win_count === 2 && result1?.winner?.life === 2 && result1?.winner?.score === 30);
     checker.Check("A: win_count 3, life 0, score 15", result1?.loser?.win_count === 3 && result1?.loser?.life === 0 && result1?.loser?.score === 15);
     checker.Check("무승부가 아니다", result1?.draw === undefined);
+    checker.Check("star = 양쪽 4 (가입 5 - 게임 시작 1)", result1?.winner?.star === 4 && result1?.loser?.star === 4, `winner=${result1?.winner?.star} loser=${result1?.loser?.star}`);
 
     // --- 6) 재게임 + 게임 중 퇴장 ---
     console.log("\n[6] 재게임 → B 가 GAME_START 직후 나감 → A 혼자 2칸 → 60초 종료 → GAME_RESULT 직후 OUT_USER");

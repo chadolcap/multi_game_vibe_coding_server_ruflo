@@ -47,6 +47,7 @@ import type {
 } from "./steppingTypes.js";
 import * as steppingGameResultRepository from "../../db/steppingGameResultRepository.js";
 import * as userCache from "../../db/userCache.js";
+import * as userRepository from "../../db/userRepository.js";
 import * as activeGame from "../room/activeGame.js";
 import * as waitingRooms from "../room/waitingRooms.js";
 import type { ActiveGameEntry, WaitingRoomEntry } from "../room/types.js";
@@ -406,6 +407,7 @@ export class SteppingGameRoom extends Room {
     // 시트: "양쪽 유저에게 ready:Y 를 받으면 맵을 정해 준다. 양쪽 유저 모두 동일한 맵을 사용 한다. 1~3"
     private StartGame(): void {
         this.game_started = true;
+        this.SpendStarForGame();
         this.game_over = false;
         this.game_started_at = new Date();
         this.plays.length = 0;
@@ -598,6 +600,7 @@ export class SteppingGameRoom extends Room {
             win_per: ComputeWinPer(winner_user.total_win_count + (is_draw ? 0 : 1), winner_user.total_game_count + 1),
             score: winner_game_score,
             life: winner_state.life,
+            star: winner_user.star,
         };
         const loser_info: SteppingGameResultPlayerInfo = {
             userid: loser_user.userid,
@@ -605,6 +608,7 @@ export class SteppingGameRoom extends Room {
             win_per: ComputeWinPer(loser_user.total_win_count, loser_user.total_game_count + 1),
             score: loser_game_score,
             life: loser_state.life,
+            star: loser_user.star,
         };
         const payload: SteppingGameResultPayload = {
             winner: winner_info,
@@ -701,13 +705,29 @@ export class SteppingGameRoom extends Room {
         client.leave(CloseCode.CONSENTED);
     }
 
+    // 게임 시작 비용을 양쪽에서 뺀다. 메모리 값은 재게임 star 검사(WantsReplay)에 쓰고, DB 저장은 기다리지 않는다.
+    private SpendStarForGame(): void {
+        for (const [sessionId, user] of this.players) {
+            this.players.set(sessionId, { ...user, star: Math.max(0, user.star - constants.GAME_START_STAR_COST) });
+            userRepository.SpendGameStar(user.userid).catch((error) => {
+                console.error(`[SteppingGameRoom] star 차감 실패 roomId=${this.roomId}:`, error instanceof Error ? error.message : error);
+            });
+        }
+    }
+
+    // 재게임을 골랐고 star 도 남아 있는지. star 가 없으면 나가기로 처리한다 — 로비에서 광고로 충전한다.
+    private WantsReplay(sessionId: string): boolean {
+        const user = this.players.get(sessionId);
+        return this.replay_by_session.get(sessionId) === true && user !== undefined && user.star >= constants.GAME_START_STAR_COST;
+    }
+
     private ResolveReplay(): void {
         if (!this.game_over) return; // 이미 처리됨 (타임아웃과 응답 완료가 겹친 경우)
         this.replay_timeout?.clear();
         this.replay_timeout = null;
 
         const sessions = [...this.players.keys()];
-        const replaying_sessions = sessions.filter((sessionId) => this.replay_by_session.get(sessionId) === true);
+        const replaying_sessions = sessions.filter((sessionId) => this.WantsReplay(sessionId));
         const leaving_sessions = sessions.filter((sessionId) => !replaying_sessions.includes(sessionId));
 
         for (const sessionId of leaving_sessions) {

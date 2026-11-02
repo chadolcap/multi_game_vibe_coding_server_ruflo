@@ -93,3 +93,15 @@ export async function SetUserName(userid: string, name: string): Promise<SetName
     }
     return "ok";
 }
+
+// 게임 시작 비용 차감 (게임방 StartGame 에서 호출). 성공하면 Redis 캐시에도 반영한다 (write-through).
+// 로비가 JOIN_MATCH 때 보유량을 검사하므로 모자란 경우는 다른 기기 동시 접속 같은 경합뿐이다 — 게임은 막지 않고 로그만 남긴다.
+export async function SpendGameStar(userid: string): Promise<void> {
+    const star = await userRegistration.SpendUserStar(connection.GetDbPool(), userid, constants.GAME_START_STAR_COST);
+    if (star === null) {
+        console.warn(`[userRepository] star 부족으로 차감하지 못함 userid=${userid}`);
+        return;
+    }
+    const cached = await userCache.GetUserCache(userid);
+    if (cached) await userCache.SaveUserCache({ ...cached, star });
+}

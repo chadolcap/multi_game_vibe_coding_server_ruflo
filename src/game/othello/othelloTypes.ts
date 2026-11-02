@@ -69,6 +69,7 @@ export interface OthelloGameResultPlayerInfo {
     userid: string;
     win_count: number; // 최종 돌 개수
     win_per: number; // total_win_count 기준 승률 (0~100 정수)
+    star: number; // 남은 star — 0 이면 클라이언트가 재게임 대신 star 부족 팝업을 띄운다
 }
 
 export interface OthelloGameResultPayload {

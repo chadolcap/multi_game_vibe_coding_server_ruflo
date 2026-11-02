@@ -103,3 +103,13 @@ export async function AddUserStar(pool: Pool, userid: string, amount: number): P
     const row = (rows as { star: number }[])[0];
     return row ? row.star : null;
 }
+
+// 게임 시작 비용으로 star 를 빼고, 뺀 뒤의 보유량을 돌려준다. 유저가 없거나 star 가 모자라면 null.
+// ⚠️ star 는 UNSIGNED 라 조건 없이 빼면 0 에서 오류가 난다 — 모자란지 검사를 UPDATE 조건에 함께 넣는다.
+export async function SpendUserStar(pool: Pool, userid: string, amount: number): Promise<number | null> {
+    const [result] = await pool.query("UPDATE user_member_info SET star = star - ? WHERE userid = ? AND star >= ?", [amount, userid, amount]);
+    if ((result as { affectedRows: number }).affectedRows === 0) return null;
+    const [rows] = await pool.query("SELECT star FROM user_member_info WHERE userid = ?", [userid]);
+    const row = (rows as { star: number }[])[0];
+    return row ? row.star : null;
+}

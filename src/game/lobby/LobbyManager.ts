@@ -395,6 +395,15 @@ export class LobbyManager {
         const queue = this.match_queue_by_game.get(game);
         if (!queue) return; // 모르는 게임 종류 — 무시 (문서에 실패 응답이 없음)
 
+        const entry = this.waiting_by_userid.get(userid);
+        if (!entry) return; // 이미 매칭돼 대기열에서 빠진 연결 — 무시
+
+        // star 가 없으면 매칭하지 않는다 — 로비에 남아 광고로 충전할 수 있다(연결 유지)
+        if (entry.user.star < constants.GAME_START_STAR_COST) {
+            messages.SendError(this.room, client, types.ErrorCode.NOT_ENOUGH_STAR, "star 가 부족합니다. 광고를 보고 star 를 받아 주세요.");
+            return;
+        }
+
         if (!queue.includes(userid)) {
             queue.push(userid);
         }

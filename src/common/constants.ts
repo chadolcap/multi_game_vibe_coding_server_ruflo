@@ -96,6 +96,7 @@ export const DEFAULT_AVATAR_BY_GENDER: Record<(typeof ALLOWED_GENDERS)[number], 
 // ── star / 광고 ──
 export const STAR_SIGNUP_BONUS = 5;             // 가입 시 기본 지급 star (user_member_info.star DEFAULT 와 같은 값)
 export const AD_VIEW_REWARD_STAR = 1;           // AD_VIEW_COMPLETE 1회당 지급 star
+export const GAME_START_STAR_COST = 1;          // 게임이 실제로 시작될 때(재게임 포함) 쓰는 star. 방에 들어왔다 그냥 나가면 쓰지 않는다
 // 같은 유저의 AD_VIEW_COMPLETE 최소 간격. 하루 횟수 제한은 없고(사용자 결정), 이 간격 안에 다시 오면 거부한다
 // (클라이언트 신호만 믿는 구조라 연타·재전송으로 star 를 무한히 얻는 것만 막는다). Redis 키라 로비 채널이 달라도 적용된다.
 export const AD_VIEW_COOLDOWN_SEC = 10;

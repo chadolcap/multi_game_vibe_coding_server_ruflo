@@ -39,6 +39,7 @@ export interface RpsGameResultPlayerInfo {
     userid: string;
     win_count: number;
     win_per: number;
+    star: number; // 남은 star — 0 이면 클라이언트가 재게임 대신 star 부족 팝업을 띄운다
 }
 
 // GAME_RESULT — 최종 결과 (S→C). 승자 userid 는 winner.userid 로 알 수 있어 별도 win 필드는 없다.

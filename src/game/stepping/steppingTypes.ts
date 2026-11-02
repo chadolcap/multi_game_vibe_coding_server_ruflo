@@ -57,6 +57,7 @@ export interface SteppingGameResultPlayerInfo {
     win_per: number; // total_win_count 기준 승률 (0~100 정수)
     score: number; // 게임 점수 (남은 라이프 × 10 + 칸 수 × 5)
     life: number; // 남은 라이프
+    star: number; // 남은 star — 0 이면 클라이언트가 재게임 대신 star 부족 팝업을 띄운다
 }
 
 // GAME_RESULT — 최종 결과. draw:"Y" 면 winner/loser 자리의 두 유저는 그냥 두 참가자다(오델로와 같은 관례).

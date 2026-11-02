@@ -35,6 +35,7 @@ import type {
 import * as rpsGameResultRepository from "../../db/rpsGameResultRepository.js";
 import type { RpsPlayRecord } from "../../db/rpsGameResultRepository.js";
 import * as userCache from "../../db/userCache.js";
+import * as userRepository from "../../db/userRepository.js";
 import * as activeGame from "../room/activeGame.js";
 import * as waitingRooms from "../room/waitingRooms.js";
 import type { ActiveGameEntry, WaitingRoomEntry } from "../room/types.js";
@@ -520,6 +521,7 @@ export class RpsGameRoom extends Room {
     // 둘 다 여기를 쓴다 — 재게임은 "다시 GAME_START 부터" 시작하고 READY 를 다시 받지 않는다 (TASKS.md Phase 5-4)
     private StartGame(): void {
         this.game_started = true;
+        this.SpendStarForGame();
         this.game_over = false;
         this.game_started_at = new Date();
         this.plays.length = 0;
@@ -718,11 +720,13 @@ export class RpsGameRoom extends Room {
                 userid: winner_user.userid,
                 win_count: winner_count,
                 win_per: rpsRules.ComputeWinPer(winner_user.total_win_count + 1, winner_user.total_game_count + 1),
+                star: winner_user.star,
             },
             loser: {
                 userid: loser_user.userid,
                 win_count: loser_count,
                 win_per: rpsRules.ComputeWinPer(loser_user.total_win_count, loser_user.total_game_count + 1),
+                star: loser_user.star,
             },
         };
         for (const client of this.clients) {
@@ -792,6 +796,22 @@ export class RpsGameRoom extends Room {
         client.leave(CloseCode.CONSENTED);
     }
 
+    // 게임 시작 비용을 양쪽에서 뺀다. 메모리 값은 재게임 star 검사(WantsReplay)에 쓰고, DB 저장은 기다리지 않는다.
+    private SpendStarForGame(): void {
+        for (const [sessionId, user] of this.players) {
+            this.players.set(sessionId, { ...user, star: Math.max(0, user.star - constants.GAME_START_STAR_COST) });
+            userRepository.SpendGameStar(user.userid).catch((error) => {
+                console.error(`[RpsGameRoom] star 차감 실패 roomId=${this.roomId}:`, error instanceof Error ? error.message : error);
+            });
+        }
+    }
+
+    // 재게임을 골랐고 star 도 남아 있는지. star 가 없으면 나가기로 처리한다 — 로비에서 광고로 충전한다.
+    private WantsReplay(sessionId: string): boolean {
+        const user = this.players.get(sessionId);
+        return this.replay_by_session.get(sessionId) === true && user !== undefined && user.star >= constants.GAME_START_STAR_COST;
+    }
+
     // 재게임 응답을 마무리한다 (둘 다 응답했거나, RPS_REMATCH_CHOICE_TIMEOUT_SEC 초과)
     private ResolveReplay(): void {
         if (!this.game_over) return; // 이미 처리됨 (타임아웃과 응답 완료가 겹친 경우)
@@ -799,7 +819,7 @@ export class RpsGameRoom extends Room {
         this.replay_timeout = null;
 
         const sessions = [...this.players.keys()];
-        const replaying_sessions = sessions.filter((sessionId) => this.replay_by_session.get(sessionId) === true);
+        const replaying_sessions = sessions.filter((sessionId) => this.WantsReplay(sessionId));
         const leaving_sessions = sessions.filter((sessionId) => !replaying_sessions.includes(sessionId));
 
         for (const sessionId of leaving_sessions) {

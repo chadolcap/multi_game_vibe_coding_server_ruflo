@@ -90,6 +90,7 @@ export interface FlagGameResultPayload {
     score: number;
     correct_count: number;
     win_per: number;
+    star: number; // 남은 star — 0 이면 클라이언트가 재게임 대신 star 부족 팝업을 띄운다
 }
 
 // --- 서버 내부 / DB ---

@@ -291,6 +291,7 @@ async function Main() {
     // --- 5) 최종 결과 검증 ---
     console.log("\n[5] GAME_RESULT — win_count(최종 돌 개수) 가 보드와 일치해야 한다");
     if (game_result) {
+        checker.Check("GAME_RESULT star = 양쪽 4 (가입 5 - 게임 시작 1)", game_result.winner?.star === 4 && game_result.loser?.star === 4, `winner=${game_result.winner?.star} loser=${game_result.loser?.star}`);
         const counts = CountStones(board);
         const total_from_result = (game_result.winner?.win_count ?? 0) + (game_result.loser?.win_count ?? 0);
         checker.Check(
