@@ -6,8 +6,8 @@
 //   2) 무승부 — is_draw 면 승수를 아무도 못 받고 점수도 0점이다
 
 import type { Pool } from "mysql2/promise";
-import * as steppingConstants from "../game/stepping/steppingConstants.js";
-import type { SteppingPlayRecord } from "../game/stepping/steppingTypes.js";
+import * as steppingConstants from "../games/stepping/steppingConstants.js";
+import type { SteppingPlayRecord } from "../games/stepping/steppingTypes.js";
 import type { UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as steppingGameLog from "./queries/steppingGameLog.js";

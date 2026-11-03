@@ -3,8 +3,8 @@
 // (LobbyManager)가 ENTER_LOBBY 때 이 값으로 matchMaker.reconnect() 를 시도한다.
 // userid 별로 값 하나만 있으면 되므로(같은 유저가 동시에 두 게임방에 있을 수 없다) 단순 키-값으로 둔다.
 
-import * as constants from "../../common/constants.js";
-import * as redis from "../../db/redis.js";
+import * as constants from "../common/constants.js";
+import * as redis from "../db/redis.js";
 import type { ActiveGameEntry } from "./types.js";
 
 function GetKey(userid: string): string {

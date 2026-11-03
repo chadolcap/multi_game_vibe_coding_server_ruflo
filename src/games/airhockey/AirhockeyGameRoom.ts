@@ -55,9 +55,9 @@ import type {
 import * as airhockeyGameResultRepository from "../../db/airhockeyGameResultRepository.js";
 import * as userCache from "../../db/userCache.js";
 import * as userRepository from "../../db/userRepository.js";
-import * as activeGame from "../room/activeGame.js";
-import * as waitingRooms from "../room/waitingRooms.js";
-import type { ActiveGameEntry, WaitingRoomEntry } from "../room/types.js";
+import * as activeGame from "../../match/activeGame.js";
+import * as waitingRooms from "../../match/waitingRooms.js";
+import type { ActiveGameEntry, WaitingRoomEntry } from "../../match/types.js";
 
 const GAME_TYPE = "airhockey" as const;
 const TICK_SEC = airhockeyConstants.AIRHOCKEY_TICK_MS / 1000;

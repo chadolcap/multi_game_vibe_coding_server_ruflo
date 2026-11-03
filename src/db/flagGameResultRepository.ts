@@ -3,7 +3,7 @@
 // steppingGameResultRepository.ts 를 바탕으로 했다 — 유저가 한 명뿐이고, 랭킹 점수 = 게임 점수(맞춘 수 × 5)다.
 
 import type { Pool } from "mysql2/promise";
-import type { FlagPlayRecord } from "../game/flag/flagTypes.js";
+import type { FlagPlayRecord } from "../games/flag/flagTypes.js";
 import type { UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as flagGameLog from "./queries/flagGameLog.js";

@@ -472,7 +472,7 @@ async function Main() {
     checker.Check("세 번째 게임이 시작됐다 (E 가 player1)", room_e?.player1?.userid === userid_e, `player1=${room_e?.player1?.userid}`);
 
     // drop 모드 정리(재접속 → 명시적 나가기)에 쓸 토큰을 끊기 전에 읽어 둔다
-    const activeGame_mod = await import("../dist/game/room/activeGame.js");
+    const activeGame_mod = await import("../dist/match/activeGame.js");
     const active_f = await activeGame_mod.GetActiveGame(userid_f);
     const match_f_reservation = match_f?.seat_reservation;
 

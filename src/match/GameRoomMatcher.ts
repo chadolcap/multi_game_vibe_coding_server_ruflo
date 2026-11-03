@@ -4,12 +4,12 @@
 // (LobbyManager 참고). 이 클래스 자체는 어떤 게임인지 몰라도 되는 범용 매칭 로직만 가지고 있다.
 
 import { matchMaker } from "@colyseus/core";
-import type { GameType } from "../../common/channelNames.js";
-import * as channelNames from "../../common/channelNames.js";
-import * as constants from "../../common/constants.js";
-import type { GameSeatAuth, OpponentInfo, SeatReservation, UserInfo } from "../../common/types.js";
-import * as channelHeartbeat from "../../db/channelHeartbeat.js";
-import * as playInfoRepository from "../../db/playInfoRepository.js";
+import type { GameType } from "../common/channelNames.js";
+import * as channelNames from "../common/channelNames.js";
+import * as constants from "../common/constants.js";
+import type { GameSeatAuth, OpponentInfo, SeatReservation, UserInfo } from "../common/types.js";
+import * as channelHeartbeat from "../db/channelHeartbeat.js";
+import * as playInfoRepository from "../db/playInfoRepository.js";
 import * as waitingRooms from "./waitingRooms.js";
 import type { ActiveGameEntry } from "./types.js";
 

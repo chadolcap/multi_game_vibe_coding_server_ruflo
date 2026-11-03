@@ -7,7 +7,7 @@
 // othello_rank_daily/othello_rank_weekly 를 다루는 같은 모양의 함수를 따로 만든다.
 
 import type { Pool } from "mysql2/promise";
-import type { RpsChoice } from "../../game/rps/rpsTypes.js";
+import type { RpsChoice } from "../../games/rps/rpsTypes.js";
 import * as rpsGameLogSchema from "../rpsGameLogSchema.js";
 
 // 승자/패자의 total_game_count / total_win_count / today_game_count / today_win_count 와

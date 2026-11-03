@@ -5,8 +5,8 @@
 //     (사용자 결정 2026-10-15: 시트 "승리 점수 : 1판에 5점"). 승수는 승자만 +1, 무승부면 아무도 없다.
 
 import type { Pool } from "mysql2/promise";
-import * as airhockeyConstants from "../game/airhockey/airhockeyConstants.js";
-import type { AirhockeyPlayRecord } from "../game/airhockey/airhockeyTypes.js";
+import * as airhockeyConstants from "../games/airhockey/airhockeyConstants.js";
+import type { AirhockeyPlayRecord } from "../games/airhockey/airhockeyTypes.js";
 import type { UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as airhockeyGameLog from "./queries/airhockeyGameLog.js";

@@ -6,7 +6,7 @@
 // queries/rpsGameLog.ts 참고).
 
 import type { Pool } from "mysql2/promise";
-import * as rpsConstants from "../game/rps/rpsConstants.js";
+import * as rpsConstants from "../games/rps/rpsConstants.js";
 import type { UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as rpsGameLog from "./queries/rpsGameLog.js";

@@ -6,7 +6,7 @@
 
 import type { Pool } from "mysql2/promise";
 import * as flagGameLogSchema from "../flagGameLogSchema.js";
-import type { FlagPlayRecord } from "../../game/flag/flagTypes.js";
+import type { FlagPlayRecord } from "../../games/flag/flagTypes.js";
 
 // today_date 가 오늘과 다르면(자정이 지난 뒤 첫 게임) today_* 를 이번 값으로 리셋한다 — 다른 게임과 같은
 // "지연 초기화" 규칙(queries/steppingGameLog.ts 주석 참고).

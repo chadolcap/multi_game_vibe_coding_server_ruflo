@@ -241,7 +241,7 @@ async function Main() {
     // ⚠️ 우리 최소 클라이언트는 reconnectionToken 을 따로 보관하지 않는다 — 서버가 Redis(activeGame)에
     //    저장해 둔 토큰을 그대로 읽어 쓴다(로비의 REJOIN_GAME 이 클라이언트에게 주는 값과 같은 것).
     //    F5 재접속 경로와 사실상 동일하다.
-    const activeGame = await import("../dist/game/room/activeGame.js");
+    const activeGame = await import("../dist/match/activeGame.js");
     const active = await activeGame.GetActiveGame(userid_a);
     checker.Check("Redis 에 A 의 activeGame 기록이 있다", active !== null, JSON.stringify(active));
     if (!active) {

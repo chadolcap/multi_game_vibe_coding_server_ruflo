@@ -3,12 +3,12 @@
 
 import { Room, CloseCode, type Client } from "@colyseus/core";
 import type { Delayed } from "@colyseus/timer";
-import * as constants from "../../common/constants.js";
-import * as log from "../../common/log.js";
-import * as messages from "../../common/messages.js";
-import * as types from "../../common/types.js";
-import type { JoinMatchPayload, PlayInfoPayload, RankPayload } from "../../common/types.js";
-import * as roomRegistry from "../../common/roomRegistry.js";
+import * as constants from "../common/constants.js";
+import * as log from "../common/log.js";
+import * as messages from "../common/messages.js";
+import * as types from "../common/types.js";
+import type { JoinMatchPayload, LobbyMovePayload, PlayInfoPayload, RankPayload } from "../common/types.js";
+import * as roomRegistry from "../common/roomRegistry.js";
 import { LobbyManager } from "./LobbyManager.js";
 
 export class LobbyRoom extends Room {
@@ -71,6 +71,11 @@ export class LobbyRoom extends Room {
         log.RegisterLoggedMessage<JoinMatchPayload>(this, types.MessageType.JOIN_MATCH, async (client, message) => {
             await this.manager.HandleJoinMatch(client, message);
         });
+
+        log.RegisterLoggedMessage<LobbyMovePayload>(this, types.MessageType.LOBBY_MOVE, (client, message) => {
+            this.manager.HandleLobbyMove(client, message);
+        });
+        this.clock.setInterval(() => this.manager.FlushLobbyMoves(), constants.LOBBY_MOVE_FLUSH_MS);
     }
 
     public onJoin(client: Client): void {

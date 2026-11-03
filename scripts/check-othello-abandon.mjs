@@ -625,7 +625,7 @@ async function Main() {
 
     // F 의 재접속 토큰을 미리 읽어 둔다 — onDrop 은 activeGame 기록을 지우지 않으므로 끊긴 뒤에도
     // 유효하다(로비의 REJOIN_GAME 이 클라이언트에게 주는 값과 같은 것, check-othello-reconnect.mjs 참고)
-    const activeGame_mod = await import("../dist/game/room/activeGame.js");
+    const activeGame_mod = await import("../dist/match/activeGame.js");
     const active_f = await activeGame_mod.GetActiveGame(userid_f);
     checker.Check("Redis 에 F 의 activeGame 기록이 있다 (재입장에 필요)", active_f !== null, JSON.stringify(active_f));
 

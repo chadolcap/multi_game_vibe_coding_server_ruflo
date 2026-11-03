@@ -6,18 +6,20 @@
 
 import type { Client, Room } from "@colyseus/core";
 import { CloseCode } from "@colyseus/core";
-import * as channelNames from "../../common/channelNames.js";
-import type { GameType } from "../../common/channelNames.js";
-import * as constants from "../../common/constants.js";
-import * as log from "../../common/log.js";
-import * as messages from "../../common/messages.js";
-import * as nameFilter from "../../common/nameFilter.js";
-import * as types from "../../common/types.js";
+import * as channelNames from "../common/channelNames.js";
+import type { GameType } from "../common/channelNames.js";
+import * as constants from "../common/constants.js";
+import * as log from "../common/log.js";
+import * as messages from "../common/messages.js";
+import * as nameFilter from "../common/nameFilter.js";
+import * as types from "../common/types.js";
 import type {
     AdViewCompleteResultPayload,
     EnterLobbyPayload,
     EnterLobbyResultPayload,
     JoinMatchPayload,
+    LobbyMovePayload,
+    LobbyUserInfo,
     MatchFoundPayload,
     NamePayload,
     PlayInfoPayload,
@@ -28,19 +30,19 @@ import type {
     RankWeeklyResultPayload,
     RejoinGamePayload,
     UserInfo,
-} from "../../common/types.js";
+} from "../common/types.js";
 // ⚠️ 이 파일은 지역 변수로 "userid" 를 많이 쓰기 때문에, common/userid.js 모듈의 import alias 는
 // 관례(파일명 그대로)를 따르지 않고 "useridUtils" 로 바꿔서 섀도잉(가려짐)을 피한다.
-import * as useridUtils from "../../common/userid.js";
-import * as userRepository from "../../db/userRepository.js";
-import * as adRepository from "../../db/adRepository.js";
-import * as userCache from "../../db/userCache.js";
-import * as playInfoRepository from "../../db/playInfoRepository.js";
-import * as rankingRepository from "../../db/rankingRepository.js";
-import type { RankEntry } from "../../db/types.js";
-import * as activeGame from "../room/activeGame.js";
-import { GameRoomMatcher, TryReconnectToGame } from "../room/GameRoomMatcher.js";
-import * as gameRoomMatcher from "../room/GameRoomMatcher.js";
+import * as useridUtils from "../common/userid.js";
+import * as userRepository from "../db/userRepository.js";
+import * as adRepository from "../db/adRepository.js";
+import * as userCache from "../db/userCache.js";
+import * as playInfoRepository from "../db/playInfoRepository.js";
+import * as rankingRepository from "../db/rankingRepository.js";
+import type { RankEntry } from "../db/types.js";
+import * as activeGame from "../match/activeGame.js";
+import { GameRoomMatcher, TryReconnectToGame } from "../match/GameRoomMatcher.js";
+import * as gameRoomMatcher from "../match/GameRoomMatcher.js";
 
 // 실제 게임 종류 목록 — 오델로 등을 추가하면 common/channelNames.ts 의 ALL_GAME_TYPES 에 하나 더하고
 // 아래 CreateMatchersByGame 에도 추가한다 (2026-10-02 "게임별 분리 구조").
@@ -59,6 +61,10 @@ function CreateMatchersByGame(): Map<GameType, GameRoomMatcher> {
 // RankEntry(DB 조회 결과, { rank, userid, name, score }) → 문서 payload 형식인 [name, score] 튜플로 변환
 function ToRankListEntries(entries: RankEntry[]): RankListEntry[] {
     return entries.map((entry): RankListEntry => [entry.name, entry.score]);
+}
+
+function ToLobbyUserInfo(sessionId: string, user: UserInfo, position: LobbyMovePayload, color: number): LobbyUserInfo {
+    return { id: sessionId, name: user.name, avatar: user.avatar, color, x: position.x, z: position.z };
 }
 
 function IsEnterLobbyShape(payload: unknown): payload is EnterLobbyPayload {
@@ -99,6 +105,12 @@ export class LobbyManager {
     // (2026-10-02 "게임별 분리 구조" — 가위바위보 대기자가 오델로 매칭에 섞이면 안 되므로).
     private readonly match_queue_by_game = new Map<GameType, string[]>(ALL_GAME_TYPES.map((g) => [g, []]));
     private readonly matchers_by_game = CreateMatchersByGame();
+    // sessionId → 로비 섬 위치. ENTER_LOBBY 를 끝낸 유저만 있다 — 이 Map 이 "서로 보이는 유저" 목록이다.
+    private readonly position_by_session = new Map<string, LobbyMovePayload>();
+    // 지난번 FlushLobbyMoves 뒤로 위치가 바뀐 sessionId
+    private readonly moved_sessions = new Set<string>();
+    // sessionId → 오리 색. 나간 유저의 색은 다음 사람이 받을 수 있게 비운다.
+    private readonly color_by_session = new Map<string, number>();
 
     // ENTER_LOBBY 처리. 문서 기준(2026-09-30 갱신): 결과는 같은 type(ENTER_LOBBY)으로 응답하되,
     // 성공하면 { result:"Y", userid, new, name, avatar } 를 한 번에 보낸다(예전 LOBBY_ENTERED 는 폐지 —
@@ -169,8 +181,87 @@ export class LobbyManager {
         const rejoin_payload = await this.TryBuildRejoinPayload(userid);
         if (rejoin_payload) {
             this.SendRejoinGameAndLeave(client, userid, rejoin_payload);
+        } else if (this.userid_by_session.get(client.sessionId) === userid) {
+            // 위 await 사이에 나간 유저는 HandleLeave 가 이미 지웠다 — 그럴 때는 보이게 하지 않는다
+            this.AddLobbyPresence(client, result.user);
         }
         return true;
+    }
+
+    // 새 유저에게 지금 로비의 다른 유저를 알려 주고, 다른 유저에게는 새 유저를 알린다.
+    private AddLobbyPresence(client: Client, user: UserInfo): void {
+        const users: LobbyUserInfo[] = [];
+        for (const [sessionId, position] of this.position_by_session) {
+            const other_userid = this.userid_by_session.get(sessionId);
+            const other = other_userid ? this.waiting_by_userid.get(other_userid) : undefined;
+            if (other) users.push(ToLobbyUserInfo(sessionId, other.user, position, this.GetDuckColor(sessionId)));
+        }
+        const color = this.PickDuckColor(user.userid);
+        this.color_by_session.set(client.sessionId, color);
+        messages.SendMessage(this.room, client, types.MessageType.LOBBY_USERS, { users, color });
+
+        const position = { x: constants.LOBBY_START_X, z: constants.LOBBY_START_Z };
+        this.position_by_session.set(client.sessionId, position);
+        this.SendToLobbyUsers(types.MessageType.LOBBY_USER_JOIN, ToLobbyUserInfo(client.sessionId, user, position, color), client.sessionId);
+    }
+
+    // 지금 로비에서 가장 적게 쓰인 색을 고른다. 그런 색이 여럿이면 userid 로 정해진 색을 먼저 봐서,
+    // 붐비지 않을 때는 같은 유저가 들어올 때마다 같은 색을 받는다.
+    private PickDuckColor(userid: string): number {
+        const colors = constants.LOBBY_DUCK_COLORS;
+        const counts = colors.map((color) => [...this.color_by_session.values()].filter((used) => used === color).length);
+        const fewest = Math.min(...counts);
+        let hash = 0;
+        for (const ch of userid) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+        for (let step = 0; step < colors.length; step++) {
+            const index = (hash + step) % colors.length;
+            if (counts[index] === fewest) return colors[index];
+        }
+        return colors[0];
+    }
+
+    private GetDuckColor(sessionId: string): number {
+        return this.color_by_session.get(sessionId) ?? constants.LOBBY_DUCK_COLORS[0];
+    }
+
+    private RemoveLobbyPresence(sessionId: string): void {
+        if (!this.position_by_session.delete(sessionId)) return;
+        this.moved_sessions.delete(sessionId);
+        this.color_by_session.delete(sessionId);
+        this.SendToLobbyUsers(types.MessageType.LOBBY_USER_LEAVE, { id: sessionId });
+    }
+
+    // 서로 보이는 유저 전체에게 보낸다. 아직 ENTER_LOBBY 를 안 끝낸 연결은 뺀다.
+    private SendToLobbyUsers(type: string, payload: unknown, except_session?: string): void {
+        for (const client of this.room.clients) {
+            if (client.sessionId === except_session || !this.position_by_session.has(client.sessionId)) continue;
+            messages.SendMessage(this.room, client, type, payload);
+        }
+    }
+
+    // LOBBY_MOVE — 내 오리 위치. 다른 유저에게는 FlushLobbyMoves 가 묶어서 보낸다.
+    // 클라이언트가 보낸 값이라 숫자인지 검사하고 섬 안으로 자른다. 잘못된 값은 조용히 무시한다.
+    public HandleLobbyMove(client: Client, message: LobbyMovePayload): void {
+        const position = this.position_by_session.get(client.sessionId);
+        if (!position || !Number.isFinite(message?.x) || !Number.isFinite(message?.z)) return;
+
+        const from_center = Math.hypot(message.x, message.z);
+        const scale = from_center > constants.LOBBY_WALK_RADIUS ? constants.LOBBY_WALK_RADIUS / from_center : 1;
+        position.x = Math.round(message.x * scale * 100) / 100;
+        position.z = Math.round(message.z * scale * 100) / 100;
+        this.moved_sessions.add(client.sessionId);
+    }
+
+    // 유저마다 따로 중계하면 메시지 수가 유저 수의 제곱이 되므로, 주기마다 바뀐 위치만 한 메시지로 묶는다.
+    public FlushLobbyMoves(): void {
+        if (this.moved_sessions.size === 0) return;
+        const moves: [string, number, number][] = [];
+        for (const sessionId of this.moved_sessions) {
+            const position = this.position_by_session.get(sessionId);
+            if (position) moves.push([sessionId, position.x, position.z]);
+        }
+        this.moved_sessions.clear();
+        this.SendToLobbyUsers(types.MessageType.LOBBY_MOVES, { moves });
     }
 
     // activeGame.ts 에 기록이 있으면 재접속을 시도해 REJOIN_GAME payload 를 만든다. room_id 만 있으면
@@ -254,6 +345,10 @@ export class LobbyManager {
 
         entry.user = { ...entry.user, name: trimmed_name };
         messages.SendResult(this.room, client, types.MessageType.NAME, "Y");
+        const position = this.position_by_session.get(client.sessionId);
+        if (position) {
+            this.SendToLobbyUsers(types.MessageType.LOBBY_USER_JOIN, ToLobbyUserInfo(client.sessionId, entry.user, position, this.GetDuckColor(client.sessionId)), client.sessionId);
+        }
     }
 
     // AD_VIEW_COMPLETE 처리 — 로비에서 광고를 끝까지 본 클라이언트가 보낸다. star 를 지급하고(간격 제한
@@ -366,6 +461,7 @@ export class LobbyManager {
         this.waiting_by_userid.delete(userid);
         this.userid_by_session.delete(client.sessionId);
         this.RemoveFromAllMatchQueues(userid);
+        this.RemoveLobbyPresence(client.sessionId);
 
         // 떠날 때는 값을 다시 쓰지 않고 TTL 만 다시 설정한다 (CLAUDE.md 흐름 13번)
         const cached = await userCache.GetUserCache(userid);
@@ -530,6 +626,7 @@ export class LobbyManager {
         this.waiting_by_userid.delete(userid);
         this.userid_by_session.delete(client.sessionId);
 
+        this.RemoveLobbyPresence(client.sessionId);
         messages.SendMessage(this.room, client, types.MessageType.MATCH_FOUND, payload);
         client.leave(CloseCode.CONSENTED);
     }

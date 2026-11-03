@@ -114,8 +114,9 @@ npm run pm2:start:dev    # ③ watcher + lobby_1 + rps_1 + othello_1 + stepping_
 
 | 고친 곳 | 재실행 대상 |
 |---|---|
-| `game/{game}/`, `db/{game}*`, `queries/{game}*` | 그 게임 채널(`{game}_1`) |
-| `game/lobby/`, `game/room/`(매칭 — 로비에서 돎), `db/user*`·랭킹 조회 | `lobby_1` (+ 게임 결과 쪽 랭킹·통계 쓰기를 고쳤으면 해당 게임 채널) |
+| `games/{game}/`, `db/{game}*`, `queries/{game}*` | 그 게임 채널(`{game}_1`) |
+| `lobby/`, `db/user*`·랭킹 조회 | `lobby_1` (+ 게임 결과 쪽 랭킹·통계 쓰기를 고쳤으면 해당 게임 채널) |
+| `match/` | `lobby_1` + 모든 게임 채널 — 매칭(`GameRoomMatcher`)은 로비에서, 기다리는 방·재접속 기록(`waitingRooms`·`activeGame`)은 게임방에서 쓴다 |
 | `watch/` | `watcher` |
 | `common/`, `db/connection.ts`·`redis.ts`, `index.ts`, `.env` | 전부 (`npm run pm2:restart` 또는 dev 프로세스 이름 전부) |
 | 문서·`scripts/check-*.mjs`·테스트만 | 재실행 없음 |
@@ -142,12 +143,12 @@ src/
     roomRegistry.ts         이 프로세스의 Room 목록 (공지·접속자 리포트·드레인)
     userid.ts / nameFilter.ts
   watch/                    WatcherRoom / WatcherManager — 관리자 채널
-  game/
-    lobby/                  LobbyRoom / LobbyManager — 입장·별명·통계·랭킹·매칭·REJOIN_GAME
-    room/                   게임 종류를 모르는 매칭 코드
-      GameRoomMatcher.ts    채널 선택 + 방 생성 + 좌석 예약 (게임별 인스턴스)
-      waitingRooms.ts       "기다리는 방" 큐 (Redis LIST, 게임별 키)
-      activeGame.ts         userid → 게임 중인 방 (F5 재접속용)
+  lobby/                    LobbyRoom / LobbyManager — 입장·별명·통계·랭킹·매칭·REJOIN_GAME·3D 섬 위치 공유
+  match/                    게임 종류를 모르는 매칭 코드 — 로비와 게임방이 함께 쓴다
+    GameRoomMatcher.ts      채널 선택 + 방 생성 + 좌석 예약 (게임별 인스턴스, 로비에서 돎)
+    waitingRooms.ts         "기다리는 방" 큐 (Redis LIST, 게임별 키)
+    activeGame.ts           userid → 게임 중인 방 (F5 재접속용)
+  games/                    게임별 방 (클라이언트 src/games/ 와 같은 구성)
     rps/                    RpsGameRoom · rpsRules(순수 함수) · rpsTypes · rpsConstants
     othello/                OthelloGameRoom · othelloRules(순수 함수) · othelloTypes · othelloConstants
     stepping/               SteppingGameRoom · steppingRules(순수 함수) · steppingTypes · steppingConstants
@@ -450,6 +451,13 @@ F5 를 누르면 클라이언트 메모리의 `reconnectionToken` 이 사라집�
 | PLAY_INFO | C→S / S→C | `{game?}` / `{result:"Y", game, total_game_count, total_win_count, today_game_count, today_win_count}` | 그 게임의 통계 |
 | RANK_DAILY | C→S / S→C | `{game?}` / `{game, date, list:[[name,score]…], my:{rank,score}}` | 100명, 동점 공동 순위, 기록 없어도 `my` 옴 |
 | RANK_WEEKLY | C→S / S→C | `{game?}` / `{game, term:{start,end}, list, my}` | 월~일 |
+| LOBBY_MOVE 🔸 | C→S | `{x, z}` | 내 오리 위치. 입장 전·숫자 아님은 무시, 섬 밖은 잘림 |
+| LOBBY_USERS 🔸 | S→C | `{users:[{id, name, avatar, color, x, z}…], color}` | ENTER_LOBBY 성공 직후 한 번(자기 제외). `id` = 로비 sessionId, 끝의 `color` = 내 오리 색. userid·phone·star 는 보내지 않음 |
+| LOBBY_USER_JOIN 🔸 | S→C | `{id, name, avatar, color, x, z}` | 새 유저. 별명을 정하면 같은 id 로 다시 옴 |
+| LOBBY_USER_LEAVE 🔸 | S→C | `{id}` | 퇴장·매칭으로 게임 이동 |
+| LOBBY_MOVES 🔸 | S→C | `{moves:[[id, x, z]…]}` | 0.2초마다 바뀐 위치만 묶음(`LOBBY_MOVE_FLUSH_MS`). 같은 로비 채널 유저만 보임. 이 다섯 개는 C↔S 로그 없음 |
+
+- 오리 `color`(0xRRGGBB)는 **서버가 입장할 때 정한다**(`LobbyManager.PickDuckColor`). 같은 채널에서 가장 적게 쓰인 `LOBBY_DUCK_COLORS`(12색) 중, userid 로 정해진 색을 먼저 고른다 → 붐비지 않으면 같은 유저는 늘 같은 색. 13명부터는 겹친다. 저장하지 않으므로 다시 들어오면 바뀔 수 있다.
 | JOIN_MATCH | C→S | `{select:"Y/N", game?}` | `N` = 매칭 대기 취소 |
 | MATCH_FOUND 🔸 | S→C | `{game, room_name, room_id, seat_reservation, opponent:{name, avatar}}` | 상대 userid 는 보내지 않음 |
 | REJOIN_GAME 🔸 | S→C | `{game, room_name, room_id, reconnection_token}` | 6-5 참고 |
@@ -690,6 +698,7 @@ erDiagram
 | `check-airhockey-game.mjs` | 매칭 → `SERVE_SELECT`(양쪽 같은 값) 5초 → `GAME_START` → 좌표 뒤집기·중앙선 자르기 → `ONE_START.serve`·서브 쪽 퍽 → 서브 안 하고 10초 → 서브권 상대에게 → 또 10초 → 다시 돌아옴(점수 없음) → 판의 첫 LEVER_MOVE 가 끌려오지 않고 바로 놓임 → 서버가 슛·골(양쪽 궤적 반대) → 골 연출 중 끊김·재접속 `GAME_STATUS`(server 포함) → 매 판 탁구 서브 순서 확인, 서버가 골 → 첫 서버 3:2 → 결과 3초 → 재게임 첫 서브 교대 + 퇴장(A 서브 판은 살짝 넘겨 주고 봇이 3골) → OUT_USER → 재게임 무응답 10초 → RETURN_TO_LOBBY → DB. **첫 서브가 랜덤이라 승자·DB 기댓값은 SERVE_SELECT 로 계산**(약 80초). 테스트 유저끼리 매칭되지 않으면 멈추고, 예외가 나도 정리는 돈다. `MODE=invalid` = 첫 서버 서브 안 함 → 10초 뒤 서브권 넘김(횟수 안 셈) → 넘겨받은 유저가 판마다 살살 서브 후 방치 → 같은 서버로 정체 재시작 3번 → 4번째 정체에서 즉시 `GAME_RESULT{draw:"Y"}`(GAME_INVALID 없음) → A `N` 즉시 / B 무응답 10초 로비, activeGame·DB 기록 없음(약 90초) | 73/73, invalid 30/30 (서브 제한 반영 2026-10-29. 그 전 71/71 은 A·B 첫 서브 각각 2회 이상 확인, 봇을 끈 빌드에서 8건, clock 수정 전 빌드에서 무응답 1건, 고정 스텝 수정 전 빌드에서 정체 2건 실패 확인) |
 | `check-flag-game.mjs` | 즉시 MATCH_FOUND(opponent 없음) → ENTER_ROOM player1 만 → 대표 정답 즉시 Y(뒤에 보낸 답 무시) / 반대 방향 정답(내리지마→올림) / 깃발 둘 중 하나만 보냄 또는 틀린 방향 즉시 N / 무응답 5초 N(answer null) → 결과 3초 → 재게임 만점 → 무응답 10초 RETURN_TO_LOBBY → 게임 중 LEAVE·소켓 끊김 각각 현재 점수 저장 + 방 제거 + REJOIN_GAME 없음 → DB 4행·정답 누적·랭킹 → 모든 `QUEST_SHOW.say` 가 quest 와 맞는지. 1인이라 실제 클라이언트와 매칭이 섞이지 않음(약 100초) | 30/30 |
 | `check-ad-view.mjs` | ENTER_LOBBY 전 무시 → 신규 star 5 → AD_VIEW_COMPLETE Y(6) → 바로 다시 N(error 1) → DB star·`ad_log` Y·N 두 줄·Redis 캐시 → 재접속 star 6 → ADMIN_AD_LOG 오늘 요약·목록 / 없는 달 빈 결과 / 틀린 날짜 무시. JOIN_MATCH 안 보냄(약 5초) | 14/14 |
+| `check-lobby-presence.mjs` | 서로 보기: 입장 목록·JOIN·LEAVE, 다른 유저 정보에 userid·phone·star 없음, 연속 이동이 묶임, 섬 밖 자르기·잘못된 값 무시, 나중에 온 유저가 현재 위치 받음, 별명 갱신, 내가 받은 내 색 = 남이 보는 내 색, 동시 접속자끼리 색 다름. JOIN_MATCH 안 보냄(약 6초). `HOLD_SEC=n` 이면 테스트 오리가 n초 돌아다님(화면 확인용) | 16/16 (수정 전 빌드에서 11건 실패 확인) |
 | `check-star-spend.mjs` | READY 없이 퇴장 star 유지 → 게임 시작·재게임 각각 DB·Redis -1 + `GAME_RESULT.star`(청기백기·RPS, 나머지는 각 게임 스크립트) → star 0 재게임 Y 는 RETURN_TO_LOBBY → star 0 JOIN_MATCH 는 `NOT_ENOUGH_STAR` + 연결 유지 → 광고 충전 뒤 매칭 → 2인: star 없는 쪽만 로비, 남은 쪽 차감 없이 대기 → 오델로·점핑·에어하키 시작 양쪽 -1. 공용 매칭 큐 사용, 섞이면 그 단계를 실패로 끝내고 정리(약 90초) | 28/28 (수정 전 빌드에서 13건 실패 확인) |
 | `check-admin-login.mjs` / `check-send-notice.mjs` / `check-enter-lobby.mjs` | 관리자 보안 / 공지 필터 / 로비 payload | 통과 |
 
@@ -748,7 +757,7 @@ erDiagram
 |---|---|---|
 | 1 | `.env` `{GAME}_PORTS`, `constants.ts` `{GAME}_CHANNEL_COUNT`, `config.ts` | |
 | 2 | `channelNames.ts` — `GameType`, `ALL_GAME_TYPES`, `GetGameChannelCount`, `GetChannelPort` | `channelNames.test.ts` 의 `IsGameType` 단정도 수정 |
-| 3 | `game/{game}/` — Room, rules(순수 함수 + 테스트), types, constants | RPS Room 의 플랫폼 공통부(입장·재접속·재게임·퇴장 자동 모드)를 복제 |
+| 3 | `games/{game}/` — Room, rules(순수 함수 + 테스트), types, constants | RPS Room 의 플랫폼 공통부(입장·재접속·재게임·퇴장 자동 모드)를 복제 |
 | 4 | `schema.sql` 통계/랭킹 테이블, `{game}GameLogSchema.ts`, `initDb.ts` | 제약 이름 변경 |
 | 5 | `queries/{game}GameLog.ts`, `{game}GameResultRepository.ts` | `[...plays]` 복사본 |
 | 6 | `userRegistration.ts` 의 `GAME_PLAY_INFO_TABLES` 에 추가 | 기존 유저는 `db:init` 이 백필 |

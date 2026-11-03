@@ -1,6 +1,6 @@
 // 가위바위보(RPS) 게임룰이 진행되는 모듈 (2인이 게임을 하는 로직).
 // `game/room/GameRoom.ts` 에서 이름/위치를 바꿨다(2026-10-02, "게임별 분리 구조" — CLAUDE.md 참고).
-// 다른 게임(예: 오델로)을 추가하면 이 파일과 같은 패턴으로 `game/othello/OthelloGameRoom.ts` 를
+// 다른 게임(예: 오델로)을 추가하면 이 파일과 같은 패턴으로 `games/othello/OthelloGameRoom.ts` 를
 // 만들고 `index.ts` 에 등록하면 된다 — 매칭/로비/관리자(Watcher)/PM2/무중단 서비스 등 플랫폼 코드는
 // 그대로 재사용된다.
 
@@ -36,9 +36,9 @@ import * as rpsGameResultRepository from "../../db/rpsGameResultRepository.js";
 import type { RpsPlayRecord } from "../../db/rpsGameResultRepository.js";
 import * as userCache from "../../db/userCache.js";
 import * as userRepository from "../../db/userRepository.js";
-import * as activeGame from "../room/activeGame.js";
-import * as waitingRooms from "../room/waitingRooms.js";
-import type { ActiveGameEntry, WaitingRoomEntry } from "../room/types.js";
+import * as activeGame from "../../match/activeGame.js";
+import * as waitingRooms from "../../match/waitingRooms.js";
+import type { ActiveGameEntry, WaitingRoomEntry } from "../../match/types.js";
 
 function ToRoomPlayerInfo(user: UserInfo): RoomPlayerInfo {
     return { userid: user.userid, name: user.name, avatar: user.avatar, win_per: rpsRules.ComputeWinPer(user.total_win_count, user.total_game_count) };

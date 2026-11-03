@@ -7,7 +7,7 @@
 
 import type { Pool } from "mysql2/promise";
 import * as steppingGameLogSchema from "../steppingGameLogSchema.js";
-import type { SteppingPlayRecord } from "../../game/stepping/steppingTypes.js";
+import type { SteppingPlayRecord } from "../../games/stepping/steppingTypes.js";
 
 // 승자용 갱신 — 게임 수와 승수를 모두 +1 한다.
 // today_date 가 오늘과 다르면(자정이 지난 뒤 첫 게임) today_* 를 1 로 리셋하고 today_date 를 오늘로

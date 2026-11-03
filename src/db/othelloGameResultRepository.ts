@@ -5,8 +5,8 @@
 //   2) 무승부 — is_draw 면 승수를 아무도 못 받고 점수도 0점이다
 
 import type { Pool } from "mysql2/promise";
-import * as othelloConstants from "../game/othello/othelloConstants.js";
-import type { OthelloPlayRecord } from "../game/othello/othelloTypes.js";
+import * as othelloConstants from "../games/othello/othelloConstants.js";
+import type { OthelloPlayRecord } from "../games/othello/othelloTypes.js";
 import type { UserInfo } from "../common/types.js";
 import * as connection from "./connection.js";
 import * as othelloGameLog from "./queries/othelloGameLog.js";

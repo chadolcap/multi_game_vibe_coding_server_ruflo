@@ -23,7 +23,7 @@ export const PLAYERS_PER_ROOM = 2;              // 게임방 1개당 인원
 export const ENTER_LOBBY_TIMEOUT_SEC = 10;      // 접속 후 ENTER_LOBBY 제한 시간
 export const SEAT_RESERVATION_SEC = 10;         // 좌석 예약 유효 시간
 export const RECONNECT_WAIT_SEC = 5;            // 끊긴 뒤 봇 투입까지 대기
-// 가위바위보 선택 제한/연출 대기/재게임 응답 제한 등 RPS 전용 시간 상수는 game/rps/rpsConstants.ts 로
+// 가위바위보 선택 제한/연출 대기/재게임 응답 제한 등 RPS 전용 시간 상수는 games/rps/rpsConstants.ts 로
 // 옮겼다(2026-10-02, "게임별 분리 구조" — CLAUDE.md 참고).
 
 // 채널 하트비트: 게임 채널이 "지금 켜져 있는지"를 Redis 에 TTL 로 표시한다 (db/channelHeartbeat.ts).
@@ -42,7 +42,7 @@ export const CHANNEL_DRAIN_MAX_WAIT_SEC = 10 * 60;    // 10분 — 이 시간이
                                                        //  PM2 가 먼저 SIGKILL 을 보내 버리니 반드시 더 길게 맞출 것)
 
 // 게임 규칙(2선승제, 점수표 등) 상수는 게임마다 다르므로 여기 없다 — 가위바위보는
-// game/rps/rpsConstants.ts 참고(2026-10-02 분리).
+// games/rps/rpsConstants.ts 참고(2026-10-02 분리).
 
 // ── 캐시 / 랭킹 ──
 export const USER_CACHE_TTL_SEC = 120;          // Redis 유저 정보 TTL (2분)
@@ -92,6 +92,27 @@ export const DEFAULT_AVATAR_BY_GENDER: Record<(typeof ALLOWED_GENDERS)[number], 
     M: "a_m_0",
     F: "a_f_0",
 };
+
+// ── 로비 3D 섬 ── (클라이언트 src/lobby3d/lobbyPlaces.ts 와 같은 값)
+export const LOBBY_START_X = 0;                 // 접속하면 서 있는 자리 — 매표소 앞
+export const LOBBY_START_Z = 27.2;
+export const LOBBY_WALK_RADIUS = 28.6;          // 받은 위치를 이 반지름 안으로 자른다
+export const LOBBY_MOVE_FLUSH_MS = 200;         // 바뀐 위치를 묶어 보내는 간격
+// 로비 오리 색 — 같은 채널에 있는 유저끼리 가능한 한 겹치지 않게 서버가 하나씩 나눠 준다(0xRRGGBB).
+export const LOBBY_DUCK_COLORS = [
+    0xffe58a, // 노랑
+    0x8ec9ff, // 파랑
+    0xffa8c5, // 분홍
+    0x9be08a, // 초록
+    0xc7a8ff, // 보라
+    0xffb36b, // 주황
+    0x7fe3d0, // 민트
+    0xff8a80, // 빨강
+    0xf5f5f5, // 흰색
+    0xc9a27e, // 갈색
+    0xd8f27a, // 연두
+    0x9aa4b8, // 회색
+] as const;
 
 // ── star / 광고 ──
 export const STAR_SIGNUP_BONUS = 5;             // 가입 시 기본 지급 star (user_member_info.star DEFAULT 와 같은 값)

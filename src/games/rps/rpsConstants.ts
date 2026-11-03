@@ -1,5 +1,5 @@
 // 가위바위보(RPS) 전용 규칙 상수. `common/constants.ts` 에서 분리했다(2026-10-02) — 다른 게임
-// (예: 오델로)을 추가할 때 이 파일과 같은 패턴으로 `game/othello/othelloConstants.ts` 를 만들면 된다.
+// (예: 오델로)을 추가할 때 이 파일과 같은 패턴으로 `games/othello/othelloConstants.ts` 를 만들면 된다.
 // CLAUDE.md "게임별 분리 구조" 참고. 채널/포트/캐시 TTL 같은 플랫폼 공용 숫자는 여전히
 // `common/constants.ts` 에 있다 — 거긴 어떤 게임이든 똑같이 쓰는 값만 남겼다.
 

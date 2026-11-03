@@ -6,8 +6,8 @@
 // 2026-10-02 "게임별 분리 구조" — 큐를 게임 종류별로 나눈다(각 게임이 자기 게임의 "기다리는 방"만
 // 보게). 그렇지 않으면 가위바위보 대기자가 오델로 "기다리는 방"에 잘못 들어갈 수 있다.
 
-import type { GameType } from "../../common/channelNames.js";
-import * as redis from "../../db/redis.js";
+import type { GameType } from "../common/channelNames.js";
+import * as redis from "../db/redis.js";
 import type { WaitingRoomEntry } from "./types.js";
 
 function GetWaitingRoomsKey(game_type: GameType): string {

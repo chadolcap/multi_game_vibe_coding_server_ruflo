@@ -21,12 +21,12 @@ import * as roomRegistry from "./common/roomRegistry.js";
 import * as channelHeartbeat from "./db/channelHeartbeat.js";
 import * as channelUsers from "./db/channelUsers.js";
 import * as noticePubSub from "./db/noticePubSub.js";
-import { AirhockeyGameRoom } from "./game/airhockey/AirhockeyGameRoom.js";
-import { FlagGameRoom } from "./game/flag/FlagGameRoom.js";
-import { LobbyRoom } from "./game/lobby/LobbyRoom.js";
-import { OthelloGameRoom } from "./game/othello/OthelloGameRoom.js";
-import { SteppingGameRoom } from "./game/stepping/SteppingGameRoom.js";
-import { RpsGameRoom } from "./game/rps/RpsGameRoom.js";
+import { AirhockeyGameRoom } from "./games/airhockey/AirhockeyGameRoom.js";
+import { FlagGameRoom } from "./games/flag/FlagGameRoom.js";
+import { LobbyRoom } from "./lobby/LobbyRoom.js";
+import { OthelloGameRoom } from "./games/othello/OthelloGameRoom.js";
+import { SteppingGameRoom } from "./games/stepping/SteppingGameRoom.js";
+import { RpsGameRoom } from "./games/rps/RpsGameRoom.js";
 import { WatcherRoom } from "./watch/WatcherRoom.js";
 
 function Sleep(ms: number): Promise<void> {

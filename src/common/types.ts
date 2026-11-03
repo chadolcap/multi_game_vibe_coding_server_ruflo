@@ -52,6 +52,12 @@ export const MessageType = {
     // C→S {} — 로비에서 광고를 끝까지 본 뒤 보낸다 / S→C 같은 type 재사용,
     // { result:"Y", star_add, star } 또는 { result:"N", error, star } (AdViewCompleteResultPayload)
     AD_VIEW_COMPLETE: "AD_VIEW_COMPLETE",
+    // 로비 3D 섬에서 서로 보기. 다른 유저를 가리키는 id 는 userid 가 아니라 로비 sessionId 다(userid 는 mid 로 되돌릴 수 있다).
+    LOBBY_MOVE: "LOBBY_MOVE",             // C→S { x, z } — 내 오리 위치
+    LOBBY_USERS: "LOBBY_USERS",           // S→C { users:[LobbyUserInfo], color } — ENTER_LOBBY 성공 직후 한 번, 지금 로비의 다른 유저 전부 + 내 오리 색
+    LOBBY_USER_JOIN: "LOBBY_USER_JOIN",   // S→C LobbyUserInfo — 새 유저 입장. 별명을 정했을 때도 같은 id 로 다시 온다
+    LOBBY_USER_LEAVE: "LOBBY_USER_LEAVE", // S→C { id } — 유저 퇴장(매칭으로 게임에 간 경우 포함)
+    LOBBY_MOVES: "LOBBY_MOVES",           // S→C { moves:[[id, x, z]…] } — LOBBY_MOVE_FLUSH_MS 마다 바뀐 위치만 묶어서
     JOIN_MATCH: "JOIN_MATCH",             // C→S { select: "Y"|"N" } — Y: 게임 참여(매칭 대기열 등록), N: 매칭 대기 취소
                                            // (CANCEL_MATCH 는 더 이상 안 쓴다 — JOIN_MATCH 로 통합됨, 문서 반영)
     MATCH_FOUND: "MATCH_FOUND",           // S→C
@@ -69,16 +75,16 @@ export const MessageType = {
     RETURN_TO_LOBBY: "RETURN_TO_LOBBY",   // S→C (Phase 5, 추후 정의)
     OPPONENT_JOINED: "OPPONENT_JOINED",   // S→C { player: RoomPlayerInfo } — 기다리는 방에 새 상대 입장
     // SELECT_GAME / GAME_RESULT 는 **여러 게임이 공유**하는 이름이다 — payload 모양만 게임마다 다르다
-    // (game/rps/rpsTypes.ts, game/othello/othelloTypes.ts 참고).
+    // (games/rps/rpsTypes.ts, games/othello/othelloTypes.ts 참고).
     SELECT_GAME: "SELECT_GAME",           // C→S — RPS: { select: "가위"|… } / 오델로: { select: {x,y} }
     GAME_RESULT: "GAME_RESULT",           // S→C { winner, loser, draw? } 최종 결과 / C→S { replay: "Y"|"N" } — 같은 type 재사용
 
-    // 가위바위보(RPS) 전용 — 2선승제의 "한 판" 단위 진행 (payload 는 game/rps/rpsTypes.ts)
+    // 가위바위보(RPS) 전용 — 2선승제의 "한 판" 단위 진행 (payload 는 games/rps/rpsTypes.ts)
     ONE_START: "ONE_START",               // S→C { count } — 한 판 시작
     ONE_REMAIN_TIME: "ONE_REMAIN_TIME",   // S→C { count } — ONE_START 이후 남은 초를 1초 단위로 전달. count:0 이 선택 종료 신호
     ONE_RESULT: "ONE_RESULT",             // S→C { player1, player2, win? } — 한 판 결과 (무승부면 win 없음)
 
-    // 오델로 전용 — 돌 색 선택 + 턴 진행 (2026-10-07, payload 는 game/othello/othelloTypes.ts).
+    // 오델로 전용 — 돌 색 선택 + 턴 진행 (2026-10-07, payload 는 games/othello/othelloTypes.ts).
     // 엑셀본 `othello` 시트 기준.
     DOLL_SELECT: "DOLL_SELECT",                       // C→S { color: 0|1 } (0=흰색, 1=검정) / S→C { select: {색: userid} } — 같은 type 재사용
     DOLL_SELECT_REMAIN_TIME: "DOLL_SELECT_REMAIN_TIME", // S→C { count } — 돌 선택 남은 초
@@ -87,20 +93,20 @@ export const MessageType = {
     GAME_STATUS: "GAME_STATUS",                       // S→C { select, status0, status1 } — 게임 중 재접속한 **그 유저에게만** 보내는 보드 스냅샷
                                                       // (점핑은 같은 이름으로 { map, count?, player1, player2 } — steppingTypes.ts)
 
-    // 점핑(stepping) 전용 (2026-10-14, payload 는 game/stepping/steppingTypes.ts). 엑셀본 `stepping` 시트 기준.
+    // 점핑(stepping) 전용 (2026-10-14, payload 는 games/stepping/steppingTypes.ts). 엑셀본 `stepping` 시트 기준.
     // ⚠️ 시트는 MAP_SEELCT 로 오타가 나 있다 — 와이어 이름은 MAP_SELECT 로 정했다(시트 수정 필요).
     MAP_SELECT: "MAP_SELECT",                         // S→C { map: 1~3 } — 양쪽 READY 후 맵 지정
     GAME_REMAIN_TIME: "GAME_REMAIN_TIME",             // S→C { count } — GAME_START 이후 게임 남은 초 (59 … 0)
     MOVE_INFO: "MOVE_INFO",                           // C→S { count, location:{x,y}, save:"yes"|"no" } / S→C 같은 type 에 userid, life 추가
 
-    // 에어하키(airhockey) 전용 (2026-10-15, payload 는 game/airhockey/airhockeyTypes.ts). 엑셀본 `airhockey` 시트 기준.
+    // 에어하키(airhockey) 전용 (2026-10-15, payload 는 games/airhockey/airhockeyTypes.ts). 엑셀본 `airhockey` 시트 기준.
     // ONE_START / ONE_RESULT 는 RPS 와 같은 이름을 쓴다(한 골 = 한 판). 좌표는 **받는 유저 기준**(내가 아래쪽).
     // ⚠️ 둘 다 초당 수십 번 오가므로 C↔S 로그를 남기지 않는다(log.ts HIGH_FREQUENCY_MESSAGE_TYPES).
     SERVE_SELECT: "SERVE_SELECT",                     // S→C { userid } — 첫 서브 동전 던지기 결과. 5초 뒤 GAME_START (2026-10-29)
     PUCK_MOVE: "PUCK_MOVE",                           // S→C { loc:{x,y} } — 서버가 계산한 퍽 위치
     LEVER_MOVE: "LEVER_MOVE",                         // C→S { loc:{x,y} } / S→C { user, loc } — 상대 레버 위치 중계
 
-    // 청기백기(flag, 1인) 전용 (2026-10-22, payload 는 game/flag/flagTypes.ts). 엑셀본 `flag` 시트 기준.
+    // 청기백기(flag, 1인) 전용 (2026-10-22, payload 는 games/flag/flagTypes.ts). 엑셀본 `flag` 시트 기준.
     // ONE_START / ONE_RESULT 는 RPS 와 같은 이름을 쓴다(한 문제 = 한 판).
     QUEST_SHOW: "QUEST_SHOW",                         // S→C { quest:{b,w} } 문제 제시 / C→S { quest:{b,w} } 답 — 같은 type 재사용
 
@@ -186,6 +192,21 @@ export const AdViewErrorCode = {
     SERVER_ERROR: 2,  // DB/Redis 오류
 } as const;
 export type AdViewErrorCode = typeof AdViewErrorCode[keyof typeof AdViewErrorCode];
+
+// 로비에서 다른 유저에게 보여 주는 정보 — phone·userid·star 는 넣지 않는다.
+export interface LobbyUserInfo {
+    id: string; // 로비 sessionId
+    name: string;
+    avatar: string;
+    color: number; // 오리 색 0xRRGGBB — 본인 화면과 남의 화면에서 같은 값
+    x: number;
+    z: number;
+}
+
+export interface LobbyMovePayload {
+    x: number;
+    z: number;
+}
 
 // AD_VIEW_COMPLETE 결과 응답 (S→C, 요청과 같은 type 재사용). star 는 성공·실패 모두 지금 보유량이다.
 export interface AdViewCompleteResultPayload {
@@ -387,7 +408,7 @@ export interface ReadyPayload {
 }
 
 // ONE_START/ONE_REMAIN_TIME/SELECT_GAME/ONE_RESULT/GAME_RESULT 의 payload 타입은 가위바위보(RPS)
-// 전용이라 game/rps/rpsTypes.ts 로 옮겼다(2026-10-02, "게임별 분리 구조" — CLAUDE.md 참고). 여기
+// 전용이라 games/rps/rpsTypes.ts 로 옮겼다(2026-10-02, "게임별 분리 구조" — CLAUDE.md 참고). 여기
 // MessageType 의 와이어 이름 자체는 플랫폼 공용으로 그대로 둔다 — 다른 게임도 같은 이름(예:
 // SELECT_GAME, GAME_RESULT)을 재사용하되 자기 게임의 payload 타입을 따로 정의하면 된다.
 

@@ -310,7 +310,7 @@ async function Main() {
     LeverTo(game_a, 250, -500); // 둘 다 비켜 선다 — GAME_STATUS 의 LEVER1 을 정확한 자리로 확인하려고 B 도 옮겨 둔다
     LeverTo(game_b, 250, -500);
     await Sleep(500); // 골 연출 중에도 레버는 따라간다 — 자리에 멈출 때까지
-    const activeGame = await import("../dist/game/room/activeGame.js");
+    const activeGame = await import("../dist/match/activeGame.js");
     const active_b = await activeGame.GetActiveGame(userid_b);
     checker.Check("Redis 에 B 의 activeGame 기록이 있다", active_b !== null);
     game_b.Close(); // 동의 없는 종료 → onDrop → 재접속 창
@@ -531,7 +531,7 @@ async function CheckInvalidByStuck(game_a, game_b, log_a, log_b, start_i) {
     checker.Check("B 는 A 가 나간 것을 OUT_USER 로 안다", log_b.some((e) => e.type === "OUT_USER" && e.payload.userid === userid_a));
 
     await Sleep(1000);
-    const activeGame = await import("../dist/game/room/activeGame.js");
+    const activeGame = await import("../dist/match/activeGame.js");
     checker.Check("Redis activeGame 기록이 둘 다 지워졌다 (로비가 이 방으로 재접속을 안내하지 않는다)", (await activeGame.GetActiveGame(userid_a)) === null && (await activeGame.GetActiveGame(userid_b)) === null);
     const conn_mod = await import("../dist/db/connection.js");
     const pool = conn_mod.GetDbPool();

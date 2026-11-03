@@ -48,6 +48,12 @@ const SECRET_KEYS = new Set<string>(["password", "passwd", "pw", "token", "secre
 export const HIGH_FREQUENCY_MESSAGE_TYPES = new Set<string>([
     types.MessageType.PUCK_MOVE,
     types.MessageType.LEVER_MOVE,
+    // 로비 위치 공유 — 유저 수만큼 곱해져 나가므로 남기지 않는다. 입·퇴장은 [접속]/[퇴장] 로그로 알 수 있다.
+    types.MessageType.LOBBY_MOVE,
+    types.MessageType.LOBBY_MOVES,
+    types.MessageType.LOBBY_USERS,
+    types.MessageType.LOBBY_USER_JOIN,
+    types.MessageType.LOBBY_USER_LEAVE,
 ]);
 const SECRET_MASK = "***";
 
